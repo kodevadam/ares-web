@@ -1,6 +1,8 @@
 #include <ares/ares.hpp>
 
-#if !defined(PLATFORM_MACOS)
+// Emscripten: skip the 64 MiB static JIT code cache.
+// The N64 core runs interpreter-only on WASM; FixedAllocator is never used.
+#if !defined(PLATFORM_MACOS) && !defined(__EMSCRIPTEN__)
 #define STATIC_ALLOCATION
 #endif
 

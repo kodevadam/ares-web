@@ -186,6 +186,24 @@
         "USE_QT6": true,
         "ARES_BUILD_OPTIONAL_TARGETS": false
       }
+    },
+    {
+      "name": "emscripten",
+      "displayName": "WebAssembly (Emscripten)",
+      "description": "Builds ares N64 core as a WASM module for browser use via Emscripten",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build_wasm",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": {"type": "STRING", "value": "Release"},
+        "ARES_CORES": {"type": "STRING", "value": "n64"},
+        "ARES_BUILD_LOCAL": false,
+        "ARES_BUILD_OPTIONAL_TARGETS": false,
+        "ARES_UNITY_CORES": false,
+        "ARES_ENABLE_CHD": false,
+        "ENABLE_CCACHE": false,
+        "ARES_WEB": true
+      }
     }
   ],
   "buildPresets": [

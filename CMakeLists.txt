@@ -12,6 +12,25 @@ add_subdirectory(thirdparty)
 
 add_subdirectory(nall/nall)
 add_subdirectory(libco)
+
+option(ARES_WEB "Build ares as a WebAssembly module (Emscripten)" OFF)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten" OR ARES_WEB)
+  # Web/WASM build: skip native GUI, audio, input, and desktop-ui.
+  # gersemi: off
+  set(
+    ARES_CORES
+    n64
+    CACHE STRING "List of systems to be built by the project"
+  )
+  # gersemi: on
+  add_subdirectory(ares)
+  add_subdirectory(mia)
+  add_subdirectory(web)
+  message_configuration()
+  return()
+endif()
+
 add_subdirectory(ruby)
 add_subdirectory(hiro)
 

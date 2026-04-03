@@ -26,15 +26,19 @@ ares_add_sources(
     aleck64/aleck64.cpp
 )
 
-target_enable_feature(ares "N64 Vulkan rendering with paraLLEl-RDP" VULKAN)
-target_compile_definitions(ares PUBLIC VULKAN)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  target_enable_feature(ares "N64 Vulkan rendering with paraLLEl-RDP" VULKAN)
+  target_compile_definitions(ares PUBLIC VULKAN)
 
-if(OS_WINDOWS)
-  include(cmake/os-windows.cmake)
-elseif(OS_MACOS)
-  include(cmake/os-macos.cmake)
-elseif(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
-  include(cmake/os-linux.cmake)
+  if(OS_WINDOWS)
+    include(cmake/os-windows.cmake)
+  elseif(OS_MACOS)
+    include(cmake/os-macos.cmake)
+  elseif(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
+    include(cmake/os-linux.cmake)
+  endif()
+else()
+  target_disable_feature(ares "N64 Vulkan rendering with paraLLEl-RDP (disabled for WebAssembly)")
 endif()
 
 ares_add_sources(
@@ -298,6 +302,8 @@ ares_add_sources(
     vi/vi.hpp
 )
 
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+
 target_compile_definitions(ares PRIVATE VULKAN)
 
 set(
@@ -434,6 +440,8 @@ target_include_directories(
     vulkan/parallel-rdp/util
 )
 
+endif() # NOT Emscripten (Vulkan block end)
+
 target_compile_options(ares PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-newline-eof>)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -443,6 +451,6 @@ target_link_libraries(ares PUBLIC Threads::Threads)
 if(OS_WINDOWS)
   target_compile_definitions(ares PRIVATE VK_USE_PLATFORM_WIN32_KHR)
   target_link_libraries(ares PRIVATE winmm)
-else()
+elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   target_link_libraries(ares PRIVATE dl)
 endif()

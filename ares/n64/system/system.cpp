@@ -79,10 +79,12 @@ auto System::game() -> string {
 }
 
 auto System::run() -> void {
+  #if defined(VULKAN)
   if(_vulkanNeedsLoad) {
     vulkan.load(node);
     _vulkanNeedsLoad = false;
   }
+  #endif
   cpu.main();
 }
 

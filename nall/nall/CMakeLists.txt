@@ -18,8 +18,14 @@ target_compile_definitions(
 
 include(cmake/sources.cmake)
 
-find_package(Threads REQUIRED)
-target_link_libraries(nall PRIVATE Threads::Threads)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  find_package(Threads REQUIRED)
+  target_link_libraries(nall PRIVATE Threads::Threads)
+else()
+  # Emscripten: pthreads are stub-only unless USE_PTHREADS=1.
+  # We don't need real threads for the web build; avoid the pthread link dep.
+  target_compile_options(nall PRIVATE -pthread)
+endif()
 
 target_link_libraries(nall PUBLIC sljit)
 if(ARES_ENABLE_CHD)
