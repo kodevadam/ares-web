@@ -134,6 +134,28 @@ auto CPU::instruction() -> void {
     return;
   }
 
+#if defined(ARES_WEB)
+  // ── Instruction-word cache fast path ──────────────────────────────────
+  // On a cache hit we skip devirtualize() + icache.fetch() entirely and
+  // directly decode the cached word.  step(1*2) accounts for the cycle
+  // normally charged inside fetch().  Exceptions and TLB faults can't
+  // occur on a hit because the entry was populated from a successful
+  // prior fetch at the same virtual address.
+  {
+    auto& ce = iwordCache[ipu.pc >> 2 & IWC_MASK];
+    if (ce.vaddr == ipu.pc) {
+      step(1 * 2);
+      pipeline.begin();
+      instructionPrologue(ipu.pc, ce.word);
+      decoderEXECUTE(ce.word);
+      instructionEpilogue<0>();
+      pipeline.end();
+      return;
+    }
+  }
+  // ── Cache miss: fall through to normal fetch, then populate cache ──────
+#endif
+
   auto access = devirtualize<Read, Word>(ipu.pc);
   if(!access) return;
 
@@ -143,11 +165,17 @@ auto CPU::instruction() -> void {
     if(block) {
       block->execute(*this);
       return;
-    } 
+    }
   }
 
   auto data = fetch(access);
   if (!data) return;
+
+#if defined(ARES_WEB)
+  // Populate cache for next execution of this address.
+  iwordCache[ipu.pc >> 2 & IWC_MASK] = { ipu.pc, *data };
+#endif
+
   pipeline.begin();
   instructionPrologue(ipu.pc, *data);
   decoderEXECUTE(*data);
@@ -168,6 +196,9 @@ auto CPU::instructionEpilogue() -> void {
 
 auto CPU::power(bool reset) -> void {
   Thread::reset();
+#if defined(ARES_WEB)
+  iwordCacheFlush();
+#endif
 
   context.endian = Context::Endian::Big;
   context.mode = Context::Mode::Kernel;

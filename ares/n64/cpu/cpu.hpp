@@ -1005,6 +1005,40 @@ struct CPU : Thread {
     n64 excMask;
   } emuxState;
 
+#if defined(ARES_WEB)
+  // ── Instruction-word cache (web build only) ────────────────────────────
+  // Caches (vaddr → instruction_word) to skip devirtualize() + icache.fetch()
+  // on repeated execution of the same virtual address.  Keyed by
+  // (vaddr >> 2) & IWC_MASK so lookups are a single array index + compare.
+  //
+  // Invalidated on: power/reset, TLB write (TLBWI/TLBWR), I-cache invalidate
+  // (CACHE ops 0x00/0x08/0x10/0x14/0x18) since those can change what
+  // instruction is at a given virtual address.
+  static constexpr u32 IWC_BITS = 13;              // 8192 entries
+  static constexpr u32 IWC_SIZE = 1u << IWC_BITS;
+  static constexpr u32 IWC_MASK = IWC_SIZE - 1u;
+
+  struct IWCEntry { u64 vaddr; u32 word; };
+  IWCEntry iwordCache[IWC_SIZE];
+
+  // Flush every entry (used after TLB changes or reset).
+  auto iwordCacheFlush() -> void {
+    for (auto& e : iwordCache) e.vaddr = ~0ull;
+  }
+
+  // Evict the single entry covering vaddr (used for targeted CACHE ops).
+  auto iwordCacheEvict(u64 vaddr) -> void {
+    auto& e = iwordCache[vaddr >> 2 & IWC_MASK];
+    if (e.vaddr == vaddr) e.vaddr = ~0ull;
+  }
+
+  // Evict all 8 iword-cache entries that overlap an i-cache line (32 bytes).
+  auto iwordCacheEvictLine(u64 vaddr) -> void {
+    const u64 base = vaddr & ~u64(0x1f);
+    for (u32 w = 0; w < 8; w++) iwordCacheEvict(base + w * 4);
+  }
+#endif
+
   auto XDETECT(r64& rd, u64 code) -> void;
   auto XLOG(cr64& rd, cr64& rt, u64 code) -> void;
   auto XHEXDUMP(cr64& rd, cr64& rt) -> void;

@@ -129,6 +129,9 @@ auto CPU::CACHE(u8 operation, cr64& rs, s16 imm) -> void {
   case 0x00: {  //icache index invalidate
     auto& line = icache.line(access.vaddr);
     line.valid = 0;
+#if defined(ARES_WEB)
+    iwordCacheEvictLine(access.vaddr);
+#endif
     break;
   }
 
@@ -150,7 +153,12 @@ auto CPU::CACHE(u8 operation, cr64& rs, s16 imm) -> void {
 
   case 0x10: {  //icache hit invalidate
     auto& line = icache.line(access.vaddr);
-    if(line.hit(access.paddr)) line.valid = 0;
+    if(line.hit(access.paddr)) {
+      line.valid = 0;
+#if defined(ARES_WEB)
+      iwordCacheEvictLine(access.vaddr);
+#endif
+    }
     break;
   }
 

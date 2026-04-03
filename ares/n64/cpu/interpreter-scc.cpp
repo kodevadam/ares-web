@@ -352,6 +352,9 @@ auto CPU::TLBWI() -> void {
   tlb.entry[scc.index.tlbEntry] = scc.tlb;
   tlb.entry[scc.index.tlbEntry].synchronize();
   debugger.tlbWrite(scc.index.tlbEntry);
+#if defined(ARES_WEB)
+  iwordCacheFlush();  // TLB remapping may change vaddr→paddr mappings
+#endif
 }
 
 auto CPU::TLBWR() -> void {
@@ -364,4 +367,7 @@ auto CPU::TLBWR() -> void {
   tlb.entry[index] = scc.tlb;
   tlb.entry[index].synchronize();
   debugger.tlbWrite(index);
+#if defined(ARES_WEB)
+  iwordCacheFlush();  // TLB remapping may change vaddr→paddr mappings
+#endif
 }
