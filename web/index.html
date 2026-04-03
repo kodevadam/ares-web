@@ -96,27 +96,19 @@
 
 <!-- ── Scripts ─────────────────────────────────────────────────────────── -->
 
-<!-- Bridge (audio, input, main loop, WebGPU init) -->
+<!-- Bridge: spawns emu-worker.js which loads ares-web.wasm internally.
+     No ares-web.js on the main thread — WASM runs in the Worker. -->
 <script src="bridge.js"></script>
 <!-- Virtual gamepad overlay -->
 <script src="touch-controls.js"></script>
 
 <script>
-  // ─── Emscripten module config ────────────────────────────────────────────
-  var Module = {
-    onRuntimeInitialized: async function() {
-      await window.aresWebInit(Module);
-      // Init touch controls after Module is ready.
-      TouchControls.init(Module);
-    },
-    print:    function(t) { /* suppress */ },
-    printErr: function(t) { console.warn('[wasm]', t); },
-    setStatus: function(t) { if (t) document.getElementById('status').textContent = t; },
-    onAbort:  function(w) {
-      document.getElementById('status').textContent = 'Crash: ' + w;
-      document.getElementById('drop-overlay').classList.remove('hidden');
-    },
-  };
+  // ─── Touch controls init ─────────────────────────────────────────────────
+  // window.Module is the proxy defined in bridge.js; TouchControls uses it
+  // to call _ares_set_button / _ares_set_axis.
+  document.addEventListener('DOMContentLoaded', () => {
+    if (typeof TouchControls !== 'undefined') TouchControls.init(window.Module);
+  });
 
   // ─── UI helpers ─────────────────────────────────────────────────────────
 
@@ -133,7 +125,6 @@
     document.getElementById('settings-panel').classList.toggle('visible');
   }
 
-  // Volume: route through AudioContext gain node (set up in bridge.js).
   function setVolume(val) {
     document.getElementById('vol-label').textContent = val + '%';
     if (window._aresGainNode) window._aresGainNode.gain.value = val / 100;
@@ -141,7 +132,6 @@
 
   function setScale(mode) {
     const c = document.getElementById('ares-canvas');
-    const container = document.getElementById('canvas-container');
     if (mode === 'fit') {
       c.style.width = ''; c.style.height = '';
       c.style.maxWidth = '100%'; c.style.maxHeight = '100%';
@@ -155,12 +145,14 @@
 
   // ─── Drag-over visual ───────────────────────────────────────────────────
 
-  const cc = document.getElementById('canvas-container');
-  cc.addEventListener('dragenter', () => cc.classList.add('drag-over'));
-  cc.addEventListener('dragleave', (e) => {
-    if (!cc.contains(e.relatedTarget)) cc.classList.remove('drag-over');
+  document.addEventListener('DOMContentLoaded', () => {
+    const cc = document.getElementById('canvas-container');
+    cc.addEventListener('dragenter', () => cc.classList.add('drag-over'));
+    cc.addEventListener('dragleave', (e) => {
+      if (!cc.contains(e.relatedTarget)) cc.classList.remove('drag-over');
+    });
+    cc.addEventListener('drop', () => cc.classList.remove('drag-over'));
   });
-  cc.addEventListener('drop', () => cc.classList.remove('drag-over'));
 
   // ─── Service worker registration ────────────────────────────────────────
 
@@ -180,7 +172,6 @@
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredInstallPrompt = e;
-    // Show an "Install" button in the header if not already installed.
     const btn = document.createElement('button');
     btn.textContent = 'Install';
     btn.onclick = async () => {
@@ -192,9 +183,6 @@
     document.getElementById('controls').prepend(btn);
   });
 </script>
-
-<!-- Emscripten-generated JS loader -->
-<script src="ares-web.js"></script>
 
 </body>
 </html>

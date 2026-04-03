@@ -26,6 +26,7 @@ const PRECACHE_URLS = [
   './',
   './index.html',
   './bridge.js',
+  './emu-worker.js',
   './audio-worklet.js',
   './touch-controls.js',
   './styles.css',

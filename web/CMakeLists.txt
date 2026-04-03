@@ -93,7 +93,7 @@ set(ARES_WEB_LINK_FLAGS
   # chains in the N64 interpreter without stack overflow.
   "-s ASYNCIFY_STACK_SIZE=65536"
   "-s USE_WEBGPU=1"
-  "-s ENVIRONMENT=web"
+  "-s ENVIRONMENT=web,worker"
   "-s MODULARIZE=1"
   "-s EXPORT_NAME=AresN64Module"
   "-s EXPORTED_RUNTIME_METHODS=[ccall,cwrap,setValue,getValue,UTF8ToString,stringToUTF8]"
@@ -169,6 +169,7 @@ set_target_properties(ares-web PROPERTIES
 set(WEB_ASSETS
   "${CMAKE_CURRENT_SOURCE_DIR}/index.html"
   "${CMAKE_CURRENT_SOURCE_DIR}/bridge.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/emu-worker.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/audio-worklet.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/touch-controls.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/styles.css"
