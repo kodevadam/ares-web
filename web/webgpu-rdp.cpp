@@ -414,6 +414,11 @@ auto WebGpuRdp::render() -> bool {
     if (!implementation) return false;
     auto& I = *implementation;
 
+    // When GPU shaders are not yet active, return false so the software RDP
+    // in render.cpp can process commands and write pixels into RDRAM.
+    // mapScanoutRead() will then pick up those pixels from RDRAM directly.
+    if (!I.gpuRenderingActive) return false;
+
     // Identical queue-reading logic to vulkan.cpp::Vulkan::render().
     auto& command = rdp.command;
     u32 current = command.current & ~7u;

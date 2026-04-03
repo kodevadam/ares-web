@@ -39,6 +39,11 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
   endif()
 else()
   target_disable_feature(ares "N64 Vulkan rendering with paraLLEl-RDP (disabled for WebAssembly)")
+  # Activate the WebGPU and ARES_WEB code paths in the N64 core sources
+  # (vi.cpp, rdp/render.cpp, cpu/cpu.cpp, etc.) when building for Emscripten.
+  target_compile_definitions(ares PUBLIC ARES_WEB=1 WEBGPU=1)
+  # Add the repo root to include paths so <web/webgpu-rdp.hpp> resolves.
+  target_include_directories(ares PUBLIC ${CMAKE_SOURCE_DIR})
 endif()
 
 ares_add_sources(
