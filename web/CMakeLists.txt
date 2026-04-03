@@ -78,19 +78,26 @@ endforeach()
 # MODULARIZE=1: wrap the output in a factory function for clean init.
 
 set(ARES_WEB_LINK_FLAGS
-  "-O2"
+  "-O3"
   "-msimd128"
   "-flto"
   "-s WASM=1"
   "-s ALLOW_MEMORY_GROWTH=1"
   "-s INITIAL_MEMORY=268435456"  # 256 MiB
   "-s ASYNCIFY"
+  # ASYNCIFY_IGNORE_INDIRECT: skip instrumentation of indirect calls that are
+  # never on the async stack (most N64 interpreter dispatch paths).  Reduces
+  # ASYNCIFY code-size and runtime overhead significantly.
+  "-s ASYNCIFY_IGNORE_INDIRECT=1"
+  # Increase ASYNCIFY stack size (default 4096) to accommodate deeper call
+  # chains in the N64 interpreter without stack overflow.
+  "-s ASYNCIFY_STACK_SIZE=65536"
   "-s USE_WEBGPU=1"
   "-s ENVIRONMENT=web"
   "-s MODULARIZE=1"
   "-s EXPORT_NAME=AresN64Module"
   "-s EXPORTED_RUNTIME_METHODS=[ccall,cwrap,setValue,getValue,UTF8ToString,stringToUTF8]"
-  "-s EXPORTED_FUNCTIONS=[_malloc,_free,_ares_init,_ares_load_rom,_ares_run_frame,_ares_reset,_ares_get_framebuffer,_ares_get_framebuffer_width,_ares_get_framebuffer_height,_ares_set_button,_ares_set_axis]"
+  "-s EXPORTED_FUNCTIONS=[_malloc,_free,_ares_init,_ares_load_rom,_ares_run_frame,_ares_reset,_ares_get_framebuffer,_ares_get_framebuffer_width,_ares_get_framebuffer_height,_ares_set_button,_ares_set_axis,_ares_get_audio_sample_rate,_ares_get_audio_data,_ares_consume_audio,_ares_get_frame_number,_ares_advance_frames,_ares_get_frame_hash,_ares_is_running]"
   # FORCE_FILESYSTEM=1: enable Emscripten MEMFS so mia can write/read
   # the ROM via a virtual path (/tmp/rom.z64) and the N64 system can
   # create its save directory entry.
@@ -102,7 +109,7 @@ set(ARES_WEB_LINK_FLAGS
 # ---------------------------------------------------------------------------
 
 set(ARES_WEB_COMPILE_FLAGS
-  "-O2"
+  "-O3"
   "-msimd128"
   "-flto"
 )
@@ -162,6 +169,12 @@ set_target_properties(ares-web PROPERTIES
 set(WEB_ASSETS
   "${CMAKE_CURRENT_SOURCE_DIR}/index.html"
   "${CMAKE_CURRENT_SOURCE_DIR}/bridge.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/audio-worklet.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/touch-controls.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/styles.css"
+  "${CMAKE_CURRENT_SOURCE_DIR}/sw.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/manifest.json"
+  "${CMAKE_CURRENT_SOURCE_DIR}/remote-api.js"
 )
 
 foreach(_asset ${WEB_ASSETS})

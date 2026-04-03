@@ -74,12 +74,28 @@ auto WebPlatform::video(
   }
 }
 
-// Called by ares for each audio mix event.  Phase 1: drain and discard.
-// Phase 3 will push samples into a SharedArrayBuffer ring buffer.
+// Called by ares for each audio mix event.
+// Pushes stereo f32 samples into a circular ring buffer.
+// JS drains the ring via ares_get_audio_data() / ares_consume_audio().
 auto WebPlatform::audio(ares::Node::Audio::Stream stream) -> void {
   if(!stream) return;
-  f64 samples[2];
-  while(stream->pending()) stream->read(samples);
+
+  // Track the stream's sample rate (usually 44100 for N64).
+  if(stream->frequency() > 0)
+    audioSampleRate = (u32)stream->frequency();
+
+  f64 s[2];
+  while(stream->pending()) {
+    stream->read(s);
+    u32 wNext = (audioWritePos + 1) % AUDIO_RING_FRAMES;
+    if(wNext == audioReadPos) {
+      // Ring full — drop oldest sample by advancing readPos.
+      audioReadPos = (audioReadPos + 1) % AUDIO_RING_FRAMES;
+    }
+    audioRing[audioWritePos * 2 + 0] = (f32)s[0];
+    audioRing[audioWritePos * 2 + 1] = (f32)s[1];
+    audioWritePos = wNext;
+  }
 }
 
 // Called by ares when it needs to poll a controller input node.

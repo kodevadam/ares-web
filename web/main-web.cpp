@@ -220,6 +220,7 @@ void ares_run_frame() {
   // The N64 core uses direct-call scheduling (not libco coroutines), so this
   // is a simple blocking call that returns after one frame.
   s_root->run();
+  s_frameCount++;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -278,6 +279,101 @@ void ares_set_axis(u32 port, u32 axis, s32 value) {
   s16 v = (s16)(value < -32767 ? -32767 : value > 32767 ? 32767 : value);
   if(axis == 0) state.axisX = v;
   if(axis == 1) state.axisY = v;
+}
+
+// ---------------------------------------------------------------------------
+// Audio API
+// ---------------------------------------------------------------------------
+
+// Returns sample rate (Hz) of the active audio stream.
+EMSCRIPTEN_KEEPALIVE
+u32 ares_get_audio_sample_rate() {
+  if(!s_platform) return 44100;
+  return s_platform->audioSampleRate;
+}
+
+// Fills *out_ptr with a pointer to pending stereo f32 samples (interleaved L/R)
+// and *out_frames with the number of stereo frames available.
+// The pointer is valid until the next call to ares_consume_audio() or
+// ares_run_frame().  Returns 0 if no audio is loaded.
+EMSCRIPTEN_KEEPALIVE
+u32 ares_get_audio_data(const f32** out_ptr) {
+  if(!s_platform || !out_ptr) return 0;
+  auto& p = *s_platform;
+
+  u32 avail;
+  if(p.audioWritePos >= p.audioReadPos)
+    avail = p.audioWritePos - p.audioReadPos;
+  else
+    avail = WebPlatform::AUDIO_RING_FRAMES - p.audioReadPos + p.audioWritePos;
+
+  if(avail == 0) { *out_ptr = nullptr; return 0; }
+
+  // Flatten ring into contiguous staging buffer.
+  p.audioStageBuf.resize(avail * 2);
+  for(u32 i = 0; i < avail; i++) {
+    u32 idx = (p.audioReadPos + i) % WebPlatform::AUDIO_RING_FRAMES;
+    p.audioStageBuf[i * 2 + 0] = p.audioRing[idx * 2 + 0];
+    p.audioStageBuf[i * 2 + 1] = p.audioRing[idx * 2 + 1];
+  }
+
+  *out_ptr = p.audioStageBuf.data();
+  return avail;
+}
+
+// Marks the first `frames` stereo frames as consumed, advancing the read pointer.
+EMSCRIPTEN_KEEPALIVE
+void ares_consume_audio(u32 frames) {
+  if(!s_platform) return;
+  auto& p = *s_platform;
+  u32 avail;
+  if(p.audioWritePos >= p.audioReadPos)
+    avail = p.audioWritePos - p.audioReadPos;
+  else
+    avail = WebPlatform::AUDIO_RING_FRAMES - p.audioReadPos + p.audioWritePos;
+  if(frames > avail) frames = avail;
+  p.audioReadPos = (p.audioReadPos + frames) % WebPlatform::AUDIO_RING_FRAMES;
+}
+
+// ---------------------------------------------------------------------------
+// Remote Testing API (Phase 5)
+// ---------------------------------------------------------------------------
+
+static u32 s_frameCount = 0;
+
+EMSCRIPTEN_KEEPALIVE
+u32 ares_get_frame_number() {
+  return s_frameCount;
+}
+
+// Run N frames, optionally setting button state for each.
+// inputs: pointer to N*4 bytes: [port0_buttons_lo, port0_buttons_hi, axis_x_hi, axis_x_lo]
+// Pass nullptr to hold current input state.
+EMSCRIPTEN_KEEPALIVE
+void ares_advance_frames(u32 count, const u8* /*inputs*/) {
+  if (!s_loaded || !s_root) return;
+  for (u32 i = 0; i < count; i++) {
+    s_root->run();
+    s_frameCount++;
+  }
+}
+
+// Simple 32-bit XOR hash of the current framebuffer — used for regression testing.
+EMSCRIPTEN_KEEPALIVE
+u32 ares_get_frame_hash() {
+  if (!s_platform || s_platform->framebuffer.empty()) return 0;
+  u32 hash = 0x811c9dc5u;
+  for (u32 px : s_platform->framebuffer) {
+    hash ^= px;
+    hash *= 0x01000193u;
+  }
+  return hash;
+}
+
+// Returns 1 if a ROM is loaded and the emulator is running.
+EMSCRIPTEN_KEEPALIVE
+int ares_is_running() {
+  return (s_loaded && s_root && s_platform && !s_platform->shutdownRequested) ? 1 : 0;
 }
 
 } // extern "C"

@@ -32,9 +32,32 @@ auto CPU::unload() -> void {
 }
 
 auto CPU::main() -> void {
+#if defined(ARES_WEB)
+  // Idle loop detection: track the last two PCs to detect branch-to-self spins.
+  // When the CPU is spinning (e.g. waiting for a VI or timer interrupt) we
+  // fast-forward by stepping a batch of cycles so synchronize() can fire the
+  // pending interrupt sooner, avoiding wasted host CPU time.
+  u64 prevPc = ~ipu.pc;
+  u64 pprevPc = ~ipu.pc;
+#endif
   while(!vi.refreshed && GDB::server.reportPC(ipu.pc & 0xFFFFFFFF)) {
     instruction();
     synchronize();
+#if defined(ARES_WEB)
+    // If PC oscillates between two values (branch + delay slot), we are in
+    // an idle spin.  Only fast-forward when interrupts are globally enabled
+    // and none are already pending (so we don't skip over a real event).
+    if(ipu.pc == pprevPc && ipu.pc != prevPc) {
+      if(scc.status.interruptEnable && !scc.status.exceptionLevel &&
+         !(scc.cause.interruptPending & scc.status.interruptMask)) {
+        // Advance ~512 CPU cycles (1024 half-cycles) to let timers tick.
+        step(1024);
+        synchronize();
+      }
+    }
+    pprevPc = prevPc;
+    prevPc  = ipu.pc;
+#endif
   }
 
   vi.refreshed = false;

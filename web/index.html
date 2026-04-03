@@ -2,236 +2,198 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#1a1a2e">
-  <title>ares N64</title>
+
+  <!-- Cross-Origin Isolation (required for SharedArrayBuffer / WASM threads) -->
+  <!-- Also enforced by the service worker for pre-cached navigations. -->
+  <meta http-equiv="Cross-Origin-Opener-Policy"   content="same-origin">
+  <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
+
+  <!-- PWA -->
   <link rel="manifest" href="manifest.json">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
 
-    body {
-      background: #0d0d1a;
-      color: #e0e0f0;
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-
-    header {
-      width: 100%;
-      padding: 0.6rem 1.2rem;
-      background: #12122a;
-      border-bottom: 1px solid #2a2a4a;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    header h1 {
-      font-size: 1.1rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      color: #9090ff;
-    }
-
-    #controls {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-      margin-left: auto;
-    }
-
-    button {
-      background: #2a2a5a;
-      color: #c8c8ff;
-      border: 1px solid #3a3a6a;
-      border-radius: 4px;
-      padding: 0.3rem 0.8rem;
-      cursor: pointer;
-      font-size: 0.85rem;
-      transition: background 0.15s;
-    }
-    button:hover { background: #3a3a7a; }
-    button:active { background: #1a1a3a; }
-
-    #canvas-container {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 100%;
-      padding: 0.5rem;
-      position: relative;
-    }
-
-    #ares-canvas {
-      display: block;
-      image-rendering: pixelated;
-      max-width: 100%;
-      max-height: calc(100vh - 7rem);
-      border: 1px solid #2a2a4a;
-      background: #000;
-    }
-
-    #drop-overlay {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      pointer-events: none;
-      opacity: 1;
-      transition: opacity 0.3s;
-    }
-    #drop-overlay.hidden { opacity: 0; }
-
-    #drop-overlay .icon {
-      font-size: 3rem;
-      margin-bottom: 0.5rem;
-      color: #4040aa;
-    }
-    #drop-overlay p {
-      color: #6060bb;
-      font-size: 0.9rem;
-    }
-
-    footer {
-      width: 100%;
-      padding: 0.4rem 1rem;
-      background: #0a0a18;
-      border-top: 1px solid #1a1a3a;
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-      font-size: 0.78rem;
-      color: #5050a0;
-    }
-
-    #status { margin-left: auto; }
-
-    /* Hidden file input */
-    #rom-input { display: none; }
-
-    /* Key reference */
-    #key-ref {
-      display: none;
-      position: fixed;
-      bottom: 2.5rem;
-      right: 1rem;
-      background: #12122a;
-      border: 1px solid #2a2a4a;
-      border-radius: 6px;
-      padding: 0.8rem 1rem;
-      font-size: 0.78rem;
-      color: #9090cc;
-      z-index: 100;
-    }
-    #key-ref.visible { display: block; }
-    #key-ref table { border-collapse: collapse; }
-    #key-ref td { padding: 0.15rem 0.5rem; }
-    #key-ref td:first-child { color: #c0c0ff; font-family: monospace; }
-
-    @media (max-width: 600px) {
-      header h1 { font-size: 0.95rem; }
-      #key-ref { display: none !important; }
-    }
-  </style>
+  <title>ares N64</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
 <header>
   <h1>ares N64</h1>
   <div id="controls">
-    <button id="btn-load" onclick="document.getElementById('rom-input').click()">Load ROM</button>
-    <button id="btn-reset" onclick="resetEmulator()" title="Soft reset">Reset</button>
-    <button id="btn-fullscreen" onclick="enterFullscreen()" title="Fullscreen">⛶</button>
-    <button id="btn-keys" onclick="toggleKeyRef()" title="Keyboard map">⌨</button>
+    <button id="btn-load" onclick="document.getElementById('rom-input').click()"
+            title="Load ROM (z64/n64/v64)">Load ROM</button>
+    <button onclick="window.resetEmulator?.()" title="Soft-reset the console">Reset</button>
+    <button onclick="enterFullscreen()"  title="Fullscreen">⛶</button>
+    <button onclick="toggleTouchControls?.()" title="Virtual gamepad">🎮</button>
+    <button onclick="toggleKeyRef()"     title="Keyboard reference">⌨</button>
+    <button onclick="toggleSettings()"   title="Settings">⚙</button>
   </div>
 </header>
 
 <input type="file" id="rom-input" accept=".z64,.n64,.v64,.rom">
 
+<!-- ── Canvas area ─────────────────────────────────────────────────────── -->
 <div id="canvas-container">
   <canvas id="ares-canvas" width="640" height="480" tabindex="0"></canvas>
+
   <div id="drop-overlay">
     <div class="icon">🎮</div>
-    <p>Drop an N64 ROM here, or click <strong>Load ROM</strong></p>
+    <p>Drop an N64 ROM here</p>
+    <p>or click <strong>Load ROM</strong></p>
   </div>
 </div>
 
+<!-- ── Footer ──────────────────────────────────────────────────────────── -->
+<footer>
+  <span>ares N64 — WebAssembly</span>
+  <span id="status">Loading…</span>
+  <span id="fps"></span>
+</footer>
+
+<!-- ── Key reference panel ─────────────────────────────────────────────── -->
 <div id="key-ref">
+  <h3>Keyboard</h3>
   <table>
-    <tr><td>Enter</td><td>Start</td></tr>
-    <tr><td>A</td><td>Z trigger</td></tr>
-    <tr><td>Z / X</td><td>A / B</td></tr>
-    <tr><td>I / J / K / L</td><td>C-Up / C-Left / C-Down / C-Right</td></tr>
-    <tr><td>W / S / D / Q</td><td>Analog ↑ / ↓ / → / ←</td></tr>
-    <tr><td>↑↓←→</td><td>D-pad</td></tr>
-    <tr><td>Shift L/R</td><td>L / R shoulder</td></tr>
+    <tr><td>Enter</td>       <td>Start</td></tr>
+    <tr><td>A</td>           <td>Z trigger</td></tr>
+    <tr><td>Z / X</td>       <td>A / B</td></tr>
+    <tr><td>I/J/K/L</td>     <td>C-Up/Left/Down/Right</td></tr>
+    <tr><td>W/S/Q/D</td>     <td>Stick ↑↓←→</td></tr>
+    <tr><td>↑↓←→</td>       <td>D-pad</td></tr>
+    <tr><td>Shift L/R</td>   <td>L / R</td></tr>
   </table>
 </div>
 
-<footer>
-  <span>ares N64 WebAssembly</span>
-  <span id="status">Loading…</span>
-</footer>
+<!-- ── Settings panel ──────────────────────────────────────────────────── -->
+<div id="settings-panel">
+  <h3>Settings</h3>
+  <label>
+    <span>Volume</span>
+    <input id="vol-slider" type="range" min="0" max="100" value="80"
+           oninput="setVolume(this.value)">
+    <span id="vol-label">80%</span>
+  </label>
+  <label>
+    <span>Scale</span>
+    <select id="scale-select" onchange="setScale(this.value)">
+      <option value="fit"  selected>Fit window</option>
+      <option value="1x">1×</option>
+      <option value="2x">2×</option>
+      <option value="3x">3×</option>
+    </select>
+  </label>
+  <label>
+    <span>Touch controls</span>
+    <input type="checkbox" id="touch-toggle" onchange="toggleTouchControls?.()">
+  </label>
+</div>
 
-<!-- Bridge JS must come before the Emscripten module -->
+<!-- ── Scripts ─────────────────────────────────────────────────────────── -->
+
+<!-- Bridge (audio, input, main loop, WebGPU init) -->
 <script src="bridge.js"></script>
+<!-- Virtual gamepad overlay -->
+<script src="touch-controls.js"></script>
 
 <script>
-  // Emscripten module configuration.
+  // ─── Emscripten module config ────────────────────────────────────────────
   var Module = {
-    // Called once the WASM runtime is fully initialised.
-    onRuntimeInitialized: function() {
-      window.aresWebInit(Module);
+    onRuntimeInitialized: async function() {
+      await window.aresWebInit(Module);
+      // Init touch controls after Module is ready.
+      TouchControls.init(Module);
     },
-
-    // Silence the default Emscripten print/printErr to avoid console spam.
-    print: function(text) { /* console.log('[wasm]', text); */ },
-    printErr: function(text) { console.warn('[wasm]', text); },
-
-    // Status callback (called during WASM fetch/compile).
-    setStatus: function(text) {
-      if (text) document.getElementById('status').textContent = text;
-    },
-
-    // Suppress Emscripten's default exception handling modal.
-    onAbort: function(what) {
-      document.getElementById('status').textContent = 'Emulator crashed: ' + what;
+    print:    function(t) { /* suppress */ },
+    printErr: function(t) { console.warn('[wasm]', t); },
+    setStatus: function(t) { if (t) document.getElementById('status').textContent = t; },
+    onAbort:  function(w) {
+      document.getElementById('status').textContent = 'Crash: ' + w;
+      document.getElementById('drop-overlay').classList.remove('hidden');
     },
   };
 
-  // ---------------------------------------------------------------------------
-  // UI helpers
-  // ---------------------------------------------------------------------------
-
-  function resetEmulator() {
-    if (window.Module && Module._ares_reset) {
-      Module._ares_reset();
-    }
-  }
+  // ─── UI helpers ─────────────────────────────────────────────────────────
 
   function enterFullscreen() {
     const el = document.getElementById('canvas-container');
-    if (el.requestFullscreen)      el.requestFullscreen();
-    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
   }
 
   function toggleKeyRef() {
     document.getElementById('key-ref').classList.toggle('visible');
   }
 
-  // Hide the drop overlay once a ROM is loaded.
-  document.addEventListener('romLoaded', () => {
-    document.getElementById('drop-overlay').classList.add('hidden');
+  function toggleSettings() {
+    document.getElementById('settings-panel').classList.toggle('visible');
+  }
+
+  // Volume: route through AudioContext gain node (set up in bridge.js).
+  function setVolume(val) {
+    document.getElementById('vol-label').textContent = val + '%';
+    if (window._aresGainNode) window._aresGainNode.gain.value = val / 100;
+  }
+
+  function setScale(mode) {
+    const c = document.getElementById('ares-canvas');
+    const container = document.getElementById('canvas-container');
+    if (mode === 'fit') {
+      c.style.width = ''; c.style.height = '';
+      c.style.maxWidth = '100%'; c.style.maxHeight = '100%';
+    } else {
+      const factor = parseInt(mode, 10);
+      c.style.width  = (640 * factor) + 'px';
+      c.style.height = (480 * factor) + 'px';
+      c.style.maxWidth = 'none'; c.style.maxHeight = 'none';
+    }
+  }
+
+  // ─── Drag-over visual ───────────────────────────────────────────────────
+
+  const cc = document.getElementById('canvas-container');
+  cc.addEventListener('dragenter', () => cc.classList.add('drag-over'));
+  cc.addEventListener('dragleave', (e) => {
+    if (!cc.contains(e.relatedTarget)) cc.classList.remove('drag-over');
+  });
+  cc.addEventListener('drop', () => cc.classList.remove('drag-over'));
+
+  // ─── Service worker registration ────────────────────────────────────────
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        console.info('[sw] registered, scope:', reg.scope);
+      }).catch((e) => {
+        console.warn('[sw] registration failed:', e);
+      });
+    });
+  }
+
+  // ─── PWA install prompt ──────────────────────────────────────────────────
+
+  let deferredInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    // Show an "Install" button in the header if not already installed.
+    const btn = document.createElement('button');
+    btn.textContent = 'Install';
+    btn.onclick = async () => {
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === 'accepted') btn.remove();
+      deferredInstallPrompt = null;
+    };
+    document.getElementById('controls').prepend(btn);
   });
 </script>
 
-<!-- Emscripten-generated JS loader (output of the CMake build) -->
+<!-- Emscripten-generated JS loader -->
 <script src="ares-web.js"></script>
 
 </body>

@@ -62,6 +62,18 @@ struct WebPlatform : ares::Platform {
   ControllerState inputState[4];
 
   bool shutdownRequested = false;
+
+  // Audio ring buffer — stereo f32, interleaved L/R.
+  // JS reads via ares_get_audio_data() / ares_consume_audio().
+  static constexpr u32 AUDIO_RING_FRAMES = 8192;  // ~186ms at 44.1kHz
+  f32  audioRing[AUDIO_RING_FRAMES * 2] = {};
+  u32  audioWritePos = 0;  // in stereo frames
+  u32  audioReadPos  = 0;  // in stereo frames
+  u32  audioSampleRate = 44100;
+
+  // Temporary contiguous staging block filled by ares_get_audio_data().
+  // Avoids wrap-around complexity in JS.
+  std::vector<f32> audioStageBuf;
 };
 
 extern WebPlatform* g_webPlatform;

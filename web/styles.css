@@ -1,0 +1,215 @@
+/* web/styles.css — ares N64 PWA shell */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-deep:   #0d0d1a;
+  --bg-panel:  #12122a;
+  --bg-ctrl:   #1e1e3e;
+  --border:    #2a2a4a;
+  --accent:    #6060cc;
+  --text:      #c8c8f0;
+  --text-dim:  #5050a0;
+  --radius:    5px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  overflow: hidden;   /* no scroll when playing */
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────────── */
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem 1rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+#controls {
+  margin-left: auto;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+#canvas-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.3rem 1rem;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+footer #fps     { margin-left: auto; color: var(--accent); }
+footer #status  { flex: 1; }
+
+/* ── Canvas ─────────────────────────────────────────────────────────────── */
+
+#ares-canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* ── Drop overlay ────────────────────────────────────────────────────────── */
+
+#drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+
+#drop-overlay.hidden { opacity: 0; }
+
+#drop-overlay .icon { font-size: 3.5rem; color: var(--border); }
+#drop-overlay p     { color: var(--text-dim); font-size: 0.9rem; }
+#drop-overlay strong { color: var(--text); }
+
+/* Highlight on drag-over */
+body.drag-over #drop-overlay { background: rgba(96,96,204,0.06); }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+button {
+  background: var(--bg-ctrl);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button:hover  { background: #2a2a5a; border-color: var(--accent); }
+button:active { background: #111128; }
+
+#rom-input { display: none; }
+
+/* ── Key reference panel ─────────────────────────────────────────────────── */
+
+#key-ref {
+  display: none;
+  position: fixed;
+  bottom: 2.5rem;
+  right: 1rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.8rem 1rem;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  z-index: 200;
+  min-width: 200px;
+}
+#key-ref.visible { display: block; }
+#key-ref h3 { color: var(--accent); margin-bottom: 0.4rem; font-size: 0.8rem; }
+#key-ref table { border-collapse: collapse; width: 100%; }
+#key-ref td { padding: 0.12rem 0.4rem; }
+#key-ref td:first-child { color: var(--text); font-family: monospace; white-space: nowrap; }
+
+/* ── Settings panel ──────────────────────────────────────────────────────── */
+
+#settings-panel {
+  display: none;
+  position: fixed;
+  top: 3rem;
+  right: 1rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  z-index: 300;
+  min-width: 220px;
+  font-size: 0.82rem;
+}
+#settings-panel.visible { display: block; }
+#settings-panel h3 { color: var(--accent); margin-bottom: 0.6rem; }
+#settings-panel label { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+#settings-panel select { background: var(--bg-ctrl); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 0.2rem 0.4rem; }
+
+/* ── Drag-over visual ────────────────────────────────────────────────────── */
+
+#canvas-container.drag-over::after {
+  content: 'Drop ROM';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  color: var(--accent);
+  background: rgba(0,0,0,0.5);
+  border: 3px dashed var(--accent);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* ── Fullscreen ──────────────────────────────────────────────────────────── */
+
+:fullscreen #ares-canvas { width: 100vw; height: 100vh; max-width: none; max-height: none; }
+:-webkit-full-screen #ares-canvas { width: 100vw; height: 100vh; }
+
+/* ── Responsive / mobile ─────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  header h1 { font-size: 0.85rem; }
+  #key-ref  { display: none !important; }
+  footer #fps { display: none; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Touch device — enlarge tap targets */
+  button { padding: 0.5rem 1rem; font-size: 0.9rem; }
+}
