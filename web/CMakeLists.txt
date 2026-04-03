@@ -182,6 +182,15 @@ foreach(_asset ${WEB_ASSETS})
   configure_file("${_asset}" "${CMAKE_CURRENT_BINARY_DIR}/${_name}" COPYONLY)
 endforeach()
 
+# Copy icon assets (PWA manifest references icons/icon-192.png etc.)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/icons")
+foreach(_size 192 512)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/icons/icon-${_size}.png"
+    "${CMAKE_CURRENT_BINARY_DIR}/icons/icon-${_size}.png"
+    COPYONLY)
+endforeach()
+
 # ---------------------------------------------------------------------------
 # Install / output
 # ---------------------------------------------------------------------------
