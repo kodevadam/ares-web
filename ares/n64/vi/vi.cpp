@@ -25,6 +25,7 @@ auto VI::load(Node::Object parent) -> void {
     height *= vulkan.outputUpscale;
   }
   #endif
+  // WEBGPU: 1× only for Phase 2; no upscale adjustment needed.
   screen = node->append<Node::Video::Screen>("Screen", width, height);
   screen->setRefresh(std::bind_front(&VI::refresh, this));
   screen->refreshRateHint(Region::PAL() ? 50 : 60); // TODO: More accurate refresh rate hint
@@ -88,6 +89,11 @@ auto VI::main() -> void {
           gpuOutputValid = vulkan.scanoutAsync(io.field);
           vulkan.frame();
         }
+        #elif defined(WEBGPU)
+        if (webgpurdp.enable) {
+          gpuOutputValid = webgpurdp.scanoutAsync(io.field);
+          webgpurdp.frame();
+        }
         #endif
         refreshed = true;
         screen->frame();
@@ -140,7 +146,7 @@ auto VI::refresh() -> void {
     if(rgba) {
       screen->setViewport(0, 0, width, height);
       for(u32 y : range(height)) {
-        u32 y_fix = y; 
+        u32 y_fix = y;
         // When weave interlacing is active, we need to fix the order of interleaved lines for the image output
         // but only when the VI is set to interlance and we don't use supersampling (causes severe bugs)
         // Otherwise proceed as normal
@@ -159,6 +165,28 @@ auto VI::refresh() -> void {
     vulkan.endScanout();
 
     if(Model::Aleck64()) aleck64.vdp.render(screen); //aleck64 supports overlay graphics
+    return;
+  }
+  #elif defined(WEBGPU)
+  if(webgpurdp.enable && gpuOutputValid) {
+    const u8* rgba = nullptr;
+    u32 width = 0, height = 0;
+    webgpurdp.mapScanoutRead(rgba, width, height);
+    if(rgba) {
+      screen->setViewport(0, 0, width, height);
+      for(u32 y : range(height)) {
+        auto source = rgba + width * y * sizeof(u32);
+        auto target = screen->pixels(1).data() + y * 640;
+        for(u32 x : range(width)) {
+          target[x] = source[x * 4 + 0] << 16 | source[x * 4 + 1] << 8 | source[x * 4 + 2] << 0;
+        }
+      }
+    } else {
+      screen->setViewport(0, 0, 1, 1);
+      screen->pixels(1).data()[0] = 0;
+    }
+    webgpurdp.unmapScanoutRead();
+    webgpurdp.endScanout();
     return;
   }
   #endif
@@ -233,7 +261,7 @@ auto VI::power(bool reset) -> void {
   refreshed = false;
   clockFraction = 0;
 
-  #if defined(VULKAN)
+  #if defined(VULKAN) || defined(WEBGPU)
   gpuOutputValid = false;
   #endif
 }

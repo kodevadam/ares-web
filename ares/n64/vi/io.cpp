@@ -101,6 +101,8 @@ auto VI::writeWord(u32 address, u32 data_, Thread& thread) -> void {
 
   #if defined(VULKAN)
   if (vulkan.enable) vulkan.writeWord(address, data);
+  #elif defined(WEBGPU)
+  if (webgpurdp.enable) webgpurdp.writeWord(address, data);
   #endif
 
   if(address == 0) {

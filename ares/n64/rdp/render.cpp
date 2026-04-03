@@ -51,6 +51,12 @@ auto RDP::render() -> void {
     if(msg) crash(msg);
     return;
   }
+  #elif defined(WEBGPU)
+  if(webgpurdp.enable && webgpurdp.render()) {
+    const char *msg = webgpurdp.crashed();
+    if(msg) crash(msg);
+    return;
+  }
   #endif
 
   auto& memory = !command.source ? (Memory::Writable&)rdram.ram : (Memory::Writable&)rsp.dmem;

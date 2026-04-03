@@ -31,6 +31,8 @@ using v128 = __m128i;
   #if defined(__clang__)
     #pragma clang diagnostic pop
   #endif
+#elif defined(WEBGPU)
+  #include <web/webgpu-rdp.hpp>
 #endif
 
 // Include the GB core, we can use its cartridge emulation for Transfer Pak

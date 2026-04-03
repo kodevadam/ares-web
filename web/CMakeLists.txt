@@ -6,6 +6,66 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 endif()
 
 # ---------------------------------------------------------------------------
+# Embed WGSL shader sources as C string literals
+#
+# Each .wgsl file in web/shaders/ is read at configure time and written into
+# web/generated/shader_sources.h as a const char* global.  webgpu-rdp.cpp
+# #includes that header.
+# ---------------------------------------------------------------------------
+
+set(SHADER_DIR      "${CMAKE_CURRENT_SOURCE_DIR}/shaders")
+set(SHADER_HEADER   "${CMAKE_CURRENT_BINARY_DIR}/generated/shader_sources.h")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+set(SHADER_FILES
+  clear_write_mask
+  clear_indirect_buffer
+  clear_super_sampled_write_mask
+  masked_rdram_resolve
+  extract_vram
+  ubershader
+  rasterizer
+  span_setup
+  tile_binning
+  depth_blend
+  tmem_update
+  update_upscaled_domain_pre
+  update_upscaled_domain_post
+  update_upscaled_domain_resolve
+)
+
+# Build the header at configure time.
+set(_shader_header_content "// AUTO-GENERATED — do not edit by hand.\n// Run cmake to regenerate.\n\n")
+
+foreach(SHADER ${SHADER_FILES})
+  set(WGSL_FILE "${SHADER_DIR}/${SHADER}.wgsl")
+  if(EXISTS "${WGSL_FILE}")
+    file(READ "${WGSL_FILE}" _wgsl_raw)
+    # Escape backslashes and double-quotes for embedding in a C string literal.
+    string(REPLACE "\\" "\\\\" _wgsl_esc "${_wgsl_raw}")
+    string(REPLACE "\"" "\\\"" _wgsl_esc "${_wgsl_esc}")
+    string(REPLACE "\n" "\\n\"\n\"" _wgsl_esc "${_wgsl_esc}")
+    string(REPLACE "${SHADER}" "_" _var_name "${SHADER}")
+    string(REPLACE "-" "_" _var_name "wgsl_${SHADER}")
+    string(REPLACE "-" "_" _var_name "${_var_name}")
+    string(APPEND _shader_header_content
+      "static const char* wgsl_${SHADER} = \"${_wgsl_esc}\";\n\n")
+  else()
+    string(APPEND _shader_header_content
+      "static const char* wgsl_${SHADER} = \"\";\n\n")
+  endif()
+endforeach()
+
+file(WRITE "${SHADER_HEADER}" "${_shader_header_content}")
+
+# Force regeneration when any shader changes.
+foreach(SHADER ${SHADER_FILES})
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${SHADER_DIR}/${SHADER}.wgsl")
+endforeach()
+
+# ---------------------------------------------------------------------------
 # Emscripten link flags
 # ---------------------------------------------------------------------------
 
@@ -45,10 +105,6 @@ set(ARES_WEB_COMPILE_FLAGS
   "-O2"
   "-msimd128"
   "-flto"
-  "-D__EMSCRIPTEN__"
-  "-DARES_WEB=1"
-  # Disable Vulkan/native-platform paths
-  "-UNDEFINEDVULKAN"  # ensure VULKAN is NOT defined
 )
 
 # ---------------------------------------------------------------------------
@@ -58,6 +114,7 @@ set(ARES_WEB_COMPILE_FLAGS
 add_executable(ares-web
   main-web.cpp
   platform-web.cpp
+  webgpu-rdp.cpp
 )
 
 # Pull in the ares core (N64 only — enforced by ARES_CORES=n64 in preset)
@@ -73,18 +130,18 @@ target_include_directories(ares-web
   PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/thirdparty
+    ${CMAKE_CURRENT_BINARY_DIR}   # for generated/shader_sources.h
 )
 
-# Remove the VULKAN define from the ares target for this build so the
-# paraLLEl-RDP Vulkan path is not compiled.
-target_compile_definitions(ares-web PRIVATE
-  ARES_WEB=1
+# Define WEBGPU so the #if defined(WEBGPU) guards in vi.cpp, render.cpp, etc.
+# activate the WebGPU code path.  VULKAN must NOT be defined.
+target_compile_definitions(ares-web
+  PRIVATE
+    ARES_WEB=1
+    WEBGPU=1
 )
 
-# Block VULKAN define coming from ares/n64/CMakeLists.txt.
-# We achieve this by undefining it immediately after it would be set.
-# (The N64 CMakeLists.txt calls target_compile_definitions(ares PUBLIC VULKAN)
-# but we override it here for the ares-web target.)
+# Undefine VULKAN in case it leaked in from the ares N64 CMakeLists.
 target_compile_options(ares-web PRIVATE -UVULKAN)
 
 # Apply compile flags
@@ -94,16 +151,32 @@ target_compile_options(ares-web PRIVATE ${ARES_WEB_COMPILE_FLAGS})
 string(JOIN " " _link_flags_str ${ARES_WEB_LINK_FLAGS})
 set_target_properties(ares-web PROPERTIES
   LINK_FLAGS "${_link_flags_str}"
-  OUTPUT_NAME "ares-n64"
+  OUTPUT_NAME "ares-web"
   SUFFIX ".js"
 )
+
+# ---------------------------------------------------------------------------
+# Copy static web assets to build directory
+# ---------------------------------------------------------------------------
+
+set(WEB_ASSETS
+  "${CMAKE_CURRENT_SOURCE_DIR}/index.html"
+  "${CMAKE_CURRENT_SOURCE_DIR}/bridge.js"
+)
+
+foreach(_asset ${WEB_ASSETS})
+  get_filename_component(_name "${_asset}" NAME)
+  configure_file("${_asset}" "${CMAKE_CURRENT_BINARY_DIR}/${_name}" COPYONLY)
+endforeach()
 
 # ---------------------------------------------------------------------------
 # Install / output
 # ---------------------------------------------------------------------------
 
 install(FILES
-  ${CMAKE_CURRENT_BINARY_DIR}/ares-n64.js
-  ${CMAKE_CURRENT_BINARY_DIR}/ares-n64.wasm
+  ${CMAKE_CURRENT_BINARY_DIR}/ares-web.js
+  ${CMAKE_CURRENT_BINARY_DIR}/ares-web.wasm
+  ${CMAKE_CURRENT_BINARY_DIR}/index.html
+  ${CMAKE_CURRENT_BINARY_DIR}/bridge.js
   DESTINATION ${CMAKE_INSTALL_PREFIX}/web
 )

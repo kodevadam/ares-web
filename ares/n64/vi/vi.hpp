@@ -73,7 +73,7 @@ struct VI : Thread, Memory::RCP<VI> {
 //unserialized:
   bool refreshed;
 
-  #if defined(VULKAN)
+  #if defined(VULKAN) || defined(WEBGPU)
   bool gpuOutputValid = false;
   #endif
 };

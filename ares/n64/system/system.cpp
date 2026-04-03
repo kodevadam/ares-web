@@ -23,7 +23,9 @@ auto load(Node::System& node, string name) -> bool {
 }
 
 auto option(string name, string value) -> bool {
-  #if defined(VULKAN)
+  #if defined(WEBGPU)
+  if(name == "Enable GPU acceleration") webgpurdp.enable = value.boolean();
+  #elif defined(VULKAN)
   if(name == "Enable GPU acceleration") vulkan.enable = value.boolean();
   if(name == "Quality" && value == "SD" ) vulkan.internalUpscale = 1;
   if(name == "Quality" && value == "HD" ) vulkan.internalUpscale = 2;
@@ -82,6 +84,11 @@ auto System::run() -> void {
   #if defined(VULKAN)
   if(_vulkanNeedsLoad) {
     vulkan.load(node);
+    _vulkanNeedsLoad = false;
+  }
+  #elif defined(WEBGPU)
+  if(_vulkanNeedsLoad) {
+    webgpurdp.load(node);
     _vulkanNeedsLoad = false;
   }
   #endif
@@ -390,6 +397,9 @@ auto System::unload() -> void {
   #if defined(VULKAN)
   vulkan.unload();
   _vulkanNeedsLoad = false;
+  #elif defined(WEBGPU)
+  webgpurdp.unload();
+  _vulkanNeedsLoad = false;
   #endif
   cartridgeSlot.unload();
   controllerPort1.unload();
@@ -440,6 +450,9 @@ auto System::power(bool reset) -> void {
   vi.power(reset);
   #if defined(VULKAN)
   vulkan.unload();
+  _vulkanNeedsLoad = true;
+  #elif defined(WEBGPU)
+  webgpurdp.unload();
   _vulkanNeedsLoad = true;
   #endif
   ai.power(reset);
