@@ -74,8 +74,10 @@ SPEC_CONST_DEFAULTS = {
     "span_setup":  {0: ("uint", "64u"), 1: ("int", "8")},
     "tmem_update": {0: ("uint", "64u")},
     "depth_blend": {
+        # 0=RDRAM_SIZE, 1=FB_FMT(0=RGBA8888), 2=FB_COLOR_DEPTH_ALIAS, 3/%4=unknown,
+        # 5=MAX_PRIMITIVES, 6=MAX_WIDTH(→MAX_TILES_X=128), 7=RDRAM_INCOHERENT_SCALING
         0: ("uint", str(8*1024*1024)), 1: ("int", "0"), 2: ("int", "1"),
-        3: ("int", "8"), 4: ("int", "8"), 5: ("int", "0"), 6: ("int", "0"), 7: ("int", "0"),
+        3: ("int", "8"), 4: ("int", "8"), 5: ("int", "256"), 6: ("int", "1024"), 7: ("int", "0"),
     },
     "rasterizer": {
         # SpecId 0 = gl_WorkGroupSize.x, SpecId 1 = gl_WorkGroupSize.y (NOT RDRAM_SIZE)
@@ -84,8 +86,10 @@ SPEC_CONST_DEFAULTS = {
         4: ("int", "0"), 5: ("int", "0"), 6: ("int", "1"), 7: ("int", "0"),
     },
     "ubershader": {
+        # 0=RDRAM_SIZE, 1=FB_FMT(0=RGBA8888), 2=FB_COLOR_DEPTH_ALIAS, 3/%4=unknown,
+        # 5=MAX_PRIMITIVES, 6=MAX_WIDTH(→MAX_TILES_X=128), 7=RDRAM_INCOHERENT_SCALING
         0: ("uint", str(8*1024*1024)), 1: ("int", "0"), 2: ("int", "1"),
-        3: ("int", "8"), 4: ("int", "8"), 5: ("int", "0"), 6: ("int", "0"), 7: ("int", "0"),
+        3: ("int", "8"), 4: ("int", "8"), 5: ("int", "256"), 6: ("int", "1024"), 7: ("int", "0"),
     },
 }
 

@@ -1582,9 +1582,9 @@ fn main_1() {
     tile = vec2<i32>(_e68.xy);
     let _e72 = tile;
     let _e74 = tile;
-    linear_tile = (_e72.x + (_e74.y * 0i));
+    linear_tile = (_e72.x + (_e74.y * 128i));
     let _e80 = linear_tile;
-    linear_tile_base = (_e80 * 0i);
+    linear_tile_base = (_e80 * 8i);
     let _e84 = linear_tile;
     let _e87 = tile_binning_coarse.elems[_e84];
     let _e88 = registers;
