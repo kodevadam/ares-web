@@ -11,9 +11,9 @@
 //   • GPU device / buffer / pipeline infrastructure: complete
 //   • Utility compute shaders (clear_*, masked_rdram_resolve): functional
 //   • GPU dispatch wired up: span_setup → tile_binning → ubershader (3-pass)
-//   • Command parsing: SET_COLOR_IMAGE / SET_MASK_IMAGE / SET_SCISSOR extracted
-//   • Stream buffers (triangle/attribute/derived setup): zeroed until triangle
-//     parsing is added (separate task)
+//   • Command parsing: full RDP command set via RdpCpuParser (rdp-cpu-parser.cpp)
+//   • Stream buffers: filled by CPU parser, uploaded to GPU on each SyncFull
+//   • TMEM uploads: counted but not simulated (initial bringup)
 //   • Scanout: CPU-direct RDRAM read (correct output without GPU rendering)
 //   • Once the complex shaders are filled in, switch scanoutAsync() to the
 //     GPU-side readback path already wired up below.
@@ -38,6 +38,9 @@
 // paraLLEl-RDP data structures and LUTs
 #include "ares/n64/vulkan/parallel-rdp/parallel-rdp/rdp_data_structures.hpp"
 #include "ares/n64/vulkan/parallel-rdp/parallel-rdp/luts.hpp"
+
+// CPU-side RDP command parser (fills stream buffers for GPU dispatch)
+#include "rdp-cpu-parser.hpp"
 
 namespace ares::Nintendo64 {
 
@@ -287,6 +290,9 @@ struct WebGpuRdp::Implementation {
 
     // Per-frame dirty flag: RDRAM was written by CPU since last upload.
     bool rdramDirty = true;
+
+    // CPU-side RDP command parser (fills stream buffers for GPU dispatch).
+    Web::RdpCpuParser parser;
 };
 
 // ---------------------------------------------------------------------------
@@ -743,6 +749,30 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
     u32 fbW      = (I.fbWidth  > 0) ? I.fbWidth  : 320;
     u32 fbH      = (I.fbHeight > 0) ? I.fbHeight : 240;
 
+    // --- Upload per-SyncFull stream buffers from CPU parser ---
+    auto& P = I.parser;
+    if (!P.triangle_setup.empty())
+        wgpuQueueWriteBuffer(I.queue, I.triangleSetupBuf,    0, P.triangle_setup.data(),    P.triangle_setup.byte_size());
+    if (!P.attribute_setup.empty())
+        wgpuQueueWriteBuffer(I.queue, I.attributeSetupBuf,   0, P.attribute_setup.data(),   P.attribute_setup.byte_size());
+    if (!P.derived_setup.empty())
+        wgpuQueueWriteBuffer(I.queue, I.derivedSetupBuf,     0, P.derived_setup.data(),     P.derived_setup.byte_size());
+    if (!P.scissor_setup.empty())
+        wgpuQueueWriteBuffer(I.queue, I.scissorStateBuf,     0, P.scissor_setup.data(),     P.scissor_setup.byte_size());
+    if (!P.state_indices.empty())
+        wgpuQueueWriteBuffer(I.queue, I.stateIndicesBuf,     0, P.state_indices.data(),     P.state_indices.byte_size());
+    if (!P.span_info_offsets.empty())
+        wgpuQueueWriteBuffer(I.queue, I.spanInfoOffsetsBuf,  0, P.span_info_offsets.data(),  P.span_info_offsets.byte_size());
+    if (!P.span_info_jobs.empty())
+        wgpuQueueWriteBuffer(I.queue, I.spanInterpolationJobsBuf, 0, P.span_info_jobs.data(), P.span_info_jobs.byte_size());
+    // State caches (deduplicating)
+    if (!P.static_raster_cache.empty())
+        wgpuQueueWriteBuffer(I.queue, I.staticRasterStateBuf, 0, P.static_raster_cache.data(), P.static_raster_cache.byte_size());
+    if (!P.depth_blend_cache.empty())
+        wgpuQueueWriteBuffer(I.queue, I.depthBlendStateBuf,   0, P.depth_blend_cache.data(),   P.depth_blend_cache.byte_size());
+    if (!P.tile_info_cache.empty())
+        wgpuQueueWriteBuffer(I.queue, I.tileInfoStateBuf,     0, P.tile_info_cache.data(),     P.tile_info_cache.byte_size());
+
     // --- Upload UBO data for this SyncFull ---
 
     // tileBinningUniform: {resolution_x: u32, resolution_y: u32, primitive_count: i32, pad: i32}
@@ -900,12 +930,17 @@ auto WebGpuRdp::render() -> bool {
             return true;
         }
 
-        // Extract framebuffer/scissor state from this command before dispatch.
+        // Extract framebuffer/scissor state from this command.
         parseRdpCommand(I, w0, w1);
 
+        // Feed the full multi-word command to the CPU parser (fills stream buffers).
+        I.parser.parseCommand(&I.cmdBuffer[I.queueOffset * 2]);
+
         if (code == OP_SYNC_FULL) {
-            // Flush GPU work and raise the DP interrupt.
+            // Upload stream buffers and flush GPU work, then raise the DP interrupt.
+            I.numPrimitives = I.parser.triangle_setup.size();
             flushGpuCommands(I);
+            I.parser.reset();
             rdp.syncFull();
         }
 
