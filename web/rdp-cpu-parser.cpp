@@ -206,6 +206,7 @@ void RdpCpuParser::reset() {
     depth_blend_cache.reset();
     tile_info_cache.reset();
     tmem_upload_count = 0;
+    tmem_upload_infos.clear();
 }
 
 // =========================================================================
@@ -618,7 +619,7 @@ void RdpCpuParser::draw_shaded_primitive(TriangleSetup &setup, const AttributeSe
     InstanceIndices indices = {};
     indices.static_index       = uint8_t(static_raster_cache.add(normalize_static_state(static_raster_state)));
     indices.depth_blend_index  = uint8_t(depth_blend_cache.add(depth_blend_state));
-    indices.tile_instance_index = uint8_t(tmem_upload_count);
+    indices.tile_instance_index = 0;  // WGSL tmem_update writes only to instance 0
     for (unsigned i = 0; i < 8; i++)
         indices.tile_indices[i] = uint8_t(tile_info_cache.add(tiles[i]));
     state_indices.add(indices);
@@ -947,12 +948,27 @@ void RdpCpuParser::parseCommand(const uint32_t *words) {
     }
     case 0x34: // LoadTile
     case 0x30: // LoadTLUT
-    case 0x33: // LoadBlock
-        // Count TMEM uploads for tile_instance_index tracking.
-        // Actual TMEM simulation is not implemented yet — the GPU will
-        // use stale TMEM contents, which is acceptable for initial bringup.
+    case 0x33: { // LoadBlock
+        uint32_t tile = (words[1] >> 24) & 7;
+        LoadTileInfo info;
+        info.tex_addr  = tex_addr;
+        info.tex_width = tex_width;
+        info.fmt       = tex_fmt;
+        info.size      = tex_size;
+        info.slo = (words[0] >> 12) & 0xfff;
+        info.tlo = (words[0] >>  0) & 0xfff;
+        info.shi = (words[1] >> 12) & 0xfff;
+        info.thi = (words[1] >>  0) & 0xfff;
+        if (code == 0x33)
+            info.mode = UploadMode::Block;
+        else if (code == 0x30)
+            info.mode = UploadMode::TLUT;
+        else
+            info.mode = UploadMode::Tile;
+        load_tile_impl(tile, info);
         tmem_upload_count++;
         break;
+    }
 
     // ---- Texture image register ----
     case 0x3d: { // SetTextureImage
@@ -1028,6 +1044,207 @@ void RdpCpuParser::parseCommand(const uint32_t *words) {
     default:
         break;
     }
+}
+
+// =========================================================================
+// TMEM upload helpers (ported from rdp_renderer.cpp Renderer::load_tile /
+// Renderer::load_tile_iteration — Vulkan/GPU submission removed, UploadInfo
+// pushed onto tmem_upload_infos instead).
+// =========================================================================
+
+void RdpCpuParser::load_tile_iteration(uint32_t tile, const LoadTileInfo &info, uint32_t tmem_offset)
+{
+    using namespace RDP;
+
+    auto &sz  = tiles[tile].size;
+    auto &meta = tiles[tile].meta;
+    sz.slo = info.slo;
+    sz.shi = info.shi;
+    sz.tlo = info.tlo;
+    sz.thi = info.thi;
+
+    // Validate unsupported combinations.
+    if (meta.fmt == TextureFormat::YUV &&
+        ((meta.size != TextureSize::Bpp16) || (info.size != TextureSize::Bpp16)))
+        return;
+    if (info.size == TextureSize::Bpp4)
+        return;
+    if (meta.size == TextureSize::Bpp32 && meta.fmt != TextureFormat::RGBA)
+        return;
+    if (info.mode == UploadMode::TLUT && meta.size == TextureSize::Bpp32)
+        return;
+    if (info.mode != UploadMode::TLUT) {
+        if (info.size == TextureSize::Bpp32 && meta.size == TextureSize::Bpp8)  return;
+        if (info.size == TextureSize::Bpp16 && meta.size == TextureSize::Bpp4)  return;
+        if (info.size == TextureSize::Bpp32 && meta.size == TextureSize::Bpp4)  return;
+    }
+
+    UploadInfo upload = {};
+    upload.tmem_stride_words = meta.stride >> 1;
+
+    uint32_t upload_x = 0;
+    uint32_t upload_y = 0;
+    auto upload_mode  = info.mode;
+
+    if (upload_mode == UploadMode::Block) {
+        upload_x = info.slo;
+        upload_y = info.tlo;
+
+        unsigned pixel_count = (info.shi - info.slo + 1) & 0xfff;
+        unsigned dt = info.thi;
+
+        unsigned max_tmem_iteration = (pixel_count - 1) >> (4u - unsigned(info.size));
+        unsigned max_t = (max_tmem_iteration * dt) >> 11;
+
+        if (max_t != 0) {
+            unsigned max_n = ((1u << 11u) + dt - 1u) / dt;
+            unsigned min_n = (1u << 11u) / dt;
+            bool uneven   = (max_n != min_n);
+            if (uneven) {
+                unsigned overflow_amt = dt * max_n - (1u << 11u);
+                overflow_amt *= max_t;
+                if (overflow_amt < dt) { min_n = max_n; uneven = false; }
+            }
+
+            upload.dxt = dt << 5;
+
+            if (meta.size == TextureSize::Bpp32 || meta.fmt == TextureFormat::YUV) {
+                upload.tmem_stride_words <<= 1;
+                if (uneven && meta.size != info.size) return;
+            }
+
+            if (unsigned(meta.size) > unsigned(info.size)) {
+                unsigned shamt = unsigned(meta.size) - unsigned(info.size);
+                max_n <<= shamt; min_n <<= shamt;
+                upload.dxt >>= shamt;
+            } else if (unsigned(info.size) > unsigned(meta.size)) {
+                return; // unsupported
+            }
+
+            unsigned max_stride = max_n + (upload.tmem_stride_words >> 2);
+            unsigned min_stride = min_n + (upload.tmem_stride_words >> 2);
+            upload.min_t_mod = 1.0f / float(max_stride);
+            upload.max_t_mod = 1.0f / float(min_stride);
+            upload.width  = pixel_count;
+            upload.height = 1;
+            upload.tmem_stride_words >>= 2;
+        } else {
+            upload.width  = pixel_count;
+            upload.height = 1;
+            upload.tmem_stride_words = 0;
+            upload_mode = UploadMode::Tile;
+        }
+    } else {
+        upload_x = info.slo >> 2;
+        upload_y = info.tlo >> 2;
+        upload.width  = (((info.shi >> 2) - (info.slo >> 2)) + 1) & 0xfff;
+        upload.height = ((info.thi >> 2) - (info.tlo >> 2)) + 1;
+    }
+
+    if (!upload.width) return;
+
+    // Compute vram_effective_width based on source (info.size).
+    switch (info.size) {
+    case TextureSize::Bpp8:
+        upload.vram_effective_width = (upload.width + 7) & ~7u; break;
+    case TextureSize::Bpp16:
+        upload.vram_effective_width = (upload_mode == UploadMode::TLUT)
+            ? upload.width : (upload.width + 3) & ~3u;
+        break;
+    case TextureSize::Bpp32:
+        upload.vram_effective_width = (upload.width + 1) & ~1u; break;
+    default:
+        break;
+    }
+
+    // Adjust width for destination (meta.size).
+    switch (meta.size) {
+    case TextureSize::Bpp4:
+        upload.width = (upload.width + 15) & ~15u;
+        upload.width >>= 2;
+        break;
+    case TextureSize::Bpp8:
+        upload.width = (upload.width + 7) & ~7u;
+        upload.width >>= 1;
+        break;
+    case TextureSize::Bpp16:
+        upload.width = (upload.width + 3) & ~3u;
+        if (meta.fmt == TextureFormat::YUV) upload.width >>= 1;
+        break;
+    case TextureSize::Bpp32:
+        upload.width = (upload.width + 1) & ~1u; break;
+    default:
+        break;
+    }
+
+    if (upload.height > 1 && upload_mode == UploadMode::TLUT) return;
+
+    upload.vram_addr = int32_t(info.tex_addr + ((info.tex_width * upload_y + upload_x) << (unsigned(info.size) - 1)));
+    upload.vram_width = (upload_mode == UploadMode::Block) ? upload.vram_effective_width : int32_t(info.tex_width);
+    upload.vram_size  = int32_t(info.size);
+    upload.tmem_offset = int32_t((meta.offset + tmem_offset) & 0xfff);
+    upload.tmem_size   = int32_t(meta.size);
+    upload.tmem_fmt    = int32_t(meta.fmt);
+    upload.mode        = int32_t(upload_mode);
+    upload.inv_tmem_stride_words = upload.tmem_stride_words
+        ? 1.0f / float(upload.tmem_stride_words) : 0.0f;
+
+    // Limit to MaxTMEMInstances to prevent overflow.
+    if (tmem_upload_infos.size() < 256)
+        tmem_upload_infos.push_back(upload);
+}
+
+void RdpCpuParser::load_tile_impl(uint32_t tile, const LoadTileInfo &info)
+{
+    using namespace RDP;
+
+    // Noop checks.
+    if (info.mode != UploadMode::Block) {
+        if ((info.thi >> 2) < (info.tlo >> 2)) return;
+        unsigned pixel_count = (((info.shi >> 2) - (info.slo >> 2)) + 1) & 0xfff;
+        if (!pixel_count) return;
+    } else {
+        unsigned pixel_count = ((info.shi - info.slo) + 1) & 0xfff;
+        if (!pixel_count || pixel_count > 2048) return;
+    }
+
+    if (info.mode == UploadMode::Tile) {
+        auto &meta = tiles[tile].meta;
+        unsigned pixels_per_line = (((info.shi >> 2) - (info.slo >> 2)) + 1) & 0xfff;
+        unsigned quad_words_per_line = ((pixels_per_line << unsigned(meta.size)) + 15) >> 4;
+        if (unsigned(meta.size) > unsigned(info.size))
+            quad_words_per_line <<= unsigned(meta.size) - unsigned(info.size);
+        else if (unsigned(meta.size) < unsigned(info.size))
+            quad_words_per_line >>= unsigned(info.size) - unsigned(meta.size);
+
+        unsigned bytes_per_line = std::max<unsigned>(quad_words_per_line * 8, meta.stride);
+        unsigned max_bytes_per_line = 0x1000;
+        if (meta.fmt == TextureFormat::YUV) max_bytes_per_line /= 2;
+
+        unsigned num_lines  = ((info.thi >> 2) - (info.tlo >> 2)) + 1;
+        unsigned total_bytes = bytes_per_line * num_lines;
+
+        if (total_bytes > max_bytes_per_line) {
+            unsigned max_lines = max_bytes_per_line / bytes_per_line;
+            max_lines &= ~1u;
+            if (max_lines == 0) return;
+
+            for (unsigned line = 0; line < num_lines; line += max_lines) {
+                unsigned to_copy = std::min(num_lines - line, max_lines);
+                LoadTileInfo tmp = info;
+                tmp.tlo = uint16_t(info.tlo + (line << 2));
+                tmp.thi = uint16_t(tmp.tlo  + ((to_copy - 1) << 2));
+                load_tile_iteration(tile, tmp, line * meta.stride);
+            }
+            // Restore full tile size.
+            auto &sz = tiles[tile].size;
+            sz.slo = info.slo; sz.shi = info.shi;
+            sz.tlo = info.tlo; sz.thi = info.thi;
+            return;
+        }
+    }
+
+    load_tile_iteration(tile, info, 0);
 }
 
 } // namespace Web

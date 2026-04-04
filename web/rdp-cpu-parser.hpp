@@ -21,6 +21,7 @@
 #include <string.h>
 #include <algorithm>
 #include <limits>
+#include <vector>
 
 // paraLLEl-RDP data structures — no Vulkan headers required
 #include "ares/n64/vulkan/parallel-rdp/parallel-rdp/rdp_data_structures.hpp"
@@ -75,6 +76,10 @@ public:
                                                                                             static_raster_cache;
     RDP::StateCache<RDP::DepthBlendState,           RDP::Limits::MaxDepthBlendStates>      depth_blend_cache;
     RDP::StateCache<RDP::TileInfo,                  RDP::Limits::MaxTileInfoStates>        tile_info_cache;
+
+    // TMEM upload descriptors — filled on each Load* command, cleared on reset().
+    // Uploaded to GPU via tmemUploadInfosBuf before the tmem_update dispatch.
+    std::vector<RDP::UploadInfo>                                                            tmem_upload_infos;
 
 private:
     // ---- Persistent render state (survives across SyncFull resets) ----
@@ -134,6 +139,9 @@ private:
     }
 
     bool need_flush() const;
+
+    void load_tile_impl (uint32_t tile, const LoadTileInfo &info);
+    void load_tile_iteration(uint32_t tile, const LoadTileInfo &info, uint32_t tmem_offset);
 };
 
 } // namespace Web

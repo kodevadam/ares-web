@@ -223,13 +223,16 @@ struct WebGpuRdp::Implementation {
     WGPUBuffer tileBitmaskBuf           = nullptr;  // 8*128*128*4 = 524288 bytes
     WGPUBuffer tileBitmaskCoarseBuf     = nullptr;  // 128*128*4   = 65536 bytes
     WGPUBuffer hiddenRdramBuf           = nullptr;  // 8 MiB (same as rdram, for 2-cycle blending)
-    WGPUBuffer tmemBuf                  = nullptr;  // 4096 bytes (4 KiB TMEM)
+    WGPUBuffer tmemBuf                  = nullptr;  // 256 * 4096 = 1 MiB (TMEMInstances for ubershader)
+    WGPUBuffer tmem16Buf                = nullptr;  // 8192 bytes (TMEM16Buffer scratch for tmem_update)
     WGPUBuffer blenderDividerLUTBuf     = nullptr;  // 32768 bytes (0x8000)
 
     // --- Small UBO buffers (uniform, 256-byte aligned for WebGPU) ---
     WGPUBuffer tileBinningUniformBuf    = nullptr;  // 16 bytes: {resolution: vec2u, primitive_count: i32, pad: i32}
     WGPUBuffer globalFBInfoBuf          = nullptr;  // 16 bytes: GlobalFBInfo
     WGPUBuffer globalStateBuf           = nullptr;  // 32 bytes: GlobalState (padded to 256)
+    WGPUBuffer tmemUploadInfosBuf       = nullptr;  // 16384 bytes: UploadInfo[256] (uniform, for tmem_update)
+    WGPUBuffer tmemRegsBuf              = nullptr;  // 256 bytes: {num_uploads: i32} (uniform, for tmem_update)
 
     // --- Bind groups for the 3-pass render dispatch ---
     // span_setup (pass 1)
@@ -245,9 +248,17 @@ struct WebGpuRdp::Implementation {
     WGPUBindGroup bg_uber_g1            = nullptr;  // all stream/intermediate buffers
     WGPUBindGroup bg_uber_g2            = nullptr;  // globalFBInfo, globalState
 
+    // tmem_update (pre-render pass 0)
+    WGPUBindGroup bg_tmem_g0            = nullptr;  // rdram, tmem16, tmemInstances
+    WGPUBindGroup bg_tmem_g1            = nullptr;  // uploadInfos UBO
+    WGPUBindGroup bg_tmem_g2            = nullptr;  // registers UBO (num_uploads)
+
     // Config fingerprint used to detect when bind groups must be rebuilt.
     u32 bindGroupFbAddr      = 0xFFFFFFFF;
     u32 bindGroupFbWidth     = 0xFFFFFFFF;
+
+    // GPU readback state (set in scanoutAsync, cleared in unmapScanoutRead).
+    const uint8_t* readbackPtr = nullptr;
 
     // --- RDP command queue (u32 pairs = u64 commands, mirroring vulkan.cpp) ---
     u32  cmdBuffer[MAX_CMD_WORDS * 2] = {};
@@ -365,9 +376,12 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     I.spanSetupsBuf            = createBuffer(I.device, "SpanSetups",            SZ_SPAN_SETUPS,         BU_Storage | BU_CopyDst);
     I.tileBitmaskBuf           = createBuffer(I.device, "TileBitmask",           SZ_TILE_BITMASK,        BU_Storage | BU_CopyDst);
     I.tileBitmaskCoarseBuf     = createBuffer(I.device, "TileBitmaskCoarse",     SZ_TILE_BITMASK_COARSE, BU_Storage | BU_CopyDst);
-    I.hiddenRdramBuf           = createBuffer(I.device, "HiddenRDRAM",           RDRAM_SIZE,             BU_Storage | BU_CopyDst);
-    I.tmemBuf                  = createBuffer(I.device, "TMEM",                  4096,                   BU_Storage | BU_CopyDst);
-    I.blenderDividerLUTBuf     = createBuffer(I.device, "BlenderDividerLUT",     SZ_BLENDER_LUT,         BU_Storage | BU_CopyDst);
+    I.hiddenRdramBuf           = createBuffer(I.device, "HiddenRDRAM",           RDRAM_SIZE,              BU_Storage | BU_CopyDst);
+    // tmemBuf = TMEMInstances: 256 instances × 4096 bytes each (ubershader indexes as instance*1024 u32)
+    I.tmemBuf                  = createBuffer(I.device, "TMEMInstances",         256u * 4096u,            BU_Storage | BU_CopyDst);
+    // tmem16Buf = 2048 u32 scratch used by tmem_update shader as TMEM16Buffer
+    I.tmem16Buf                = createBuffer(I.device, "TMEM16",                2048u * 4u,              BU_Storage | BU_CopyDst);
+    I.blenderDividerLUTBuf     = createBuffer(I.device, "BlenderDividerLUT",     SZ_BLENDER_LUT,          BU_Storage | BU_CopyDst);
 
     // Upload the blender divider LUT immediately (static data from luts.hpp).
     wgpuQueueWriteBuffer(I.queue, I.blenderDividerLUTBuf, 0,
@@ -376,9 +390,13 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     // --- Allocate small UBO buffers ---
     // WebGPU requires uniform buffers to be at least 256 bytes aligned for
     // dynamic offsets, but fixed-binding UBOs just need to match the shader.
-    I.tileBinningUniformBuf = createBuffer(I.device, "TileBinningUniform", 256, BU_Uniform | BU_CopyDst);
-    I.globalFBInfoBuf       = createBuffer(I.device, "GlobalFBInfo",       256, BU_Uniform | BU_CopyDst);
-    I.globalStateBuf        = createBuffer(I.device, "GlobalState",        256, BU_Uniform | BU_CopyDst);
+    I.tileBinningUniformBuf = createBuffer(I.device, "TileBinningUniform", 256,   BU_Uniform | BU_CopyDst);
+    I.globalFBInfoBuf       = createBuffer(I.device, "GlobalFBInfo",       256,   BU_Uniform | BU_CopyDst);
+    I.globalStateBuf        = createBuffer(I.device, "GlobalState",        256,   BU_Uniform | BU_CopyDst);
+    // UploadInfo[256] array for tmem_update (@group(1) @binding(0))
+    I.tmemUploadInfosBuf    = createBuffer(I.device, "TMEMUploadInfos",    16384, BU_Uniform | BU_CopyDst);
+    // {num_uploads: i32} for tmem_update (@group(2) @binding(0))
+    I.tmemRegsBuf           = createBuffer(I.device, "TMEMRegs",           256,   BU_Uniform | BU_CopyDst);
 
     // --- Compile shader modules ---
     // Utility shaders: always compiled (their WGSL source is fully implemented).
@@ -457,11 +475,14 @@ auto WebGpuRdp::unload() -> void {
     releaseBuffer(I.tileBitmaskCoarseBuf);
     releaseBuffer(I.hiddenRdramBuf);
     releaseBuffer(I.tmemBuf);
+    releaseBuffer(I.tmem16Buf);
     releaseBuffer(I.blenderDividerLUTBuf);
     // UBO buffers
     releaseBuffer(I.tileBinningUniformBuf);
     releaseBuffer(I.globalFBInfoBuf);
     releaseBuffer(I.globalStateBuf);
+    releaseBuffer(I.tmemUploadInfosBuf);
+    releaseBuffer(I.tmemRegsBuf);
     // Bind groups
     auto releaseBG = [](WGPUBindGroup& bg){ if(bg){ wgpuBindGroupRelease(bg); bg=nullptr; } };
     releaseBG(I.bg_spanSetup_g0);
@@ -471,6 +492,9 @@ auto WebGpuRdp::unload() -> void {
     releaseBG(I.bg_uber_g0);
     releaseBG(I.bg_uber_g1);
     releaseBG(I.bg_uber_g2);
+    releaseBG(I.bg_tmem_g0);
+    releaseBG(I.bg_tmem_g1);
+    releaseBG(I.bg_tmem_g2);
 
     // Release shader modules.
     auto releaseSM = [](WGPUShaderModule& m){ if(m){ wgpuShaderModuleRelease(m); m=nullptr; } };
@@ -671,7 +695,7 @@ static void rebuildBindGroups(WebGpuRdp::Implementation& I) {
         WGPUBindGroupEntry entries0[3] = {
             bufEntry(0, I.rdramBuf,       RDRAM_SIZE),
             bufEntry(1, I.hiddenRdramBuf, RDRAM_SIZE),
-            bufEntry(2, I.tmemBuf,        4096),
+            bufEntry(2, I.tmemBuf,        256u * 4096u),
         };
         WGPUBindGroupDescriptor bgd0 = {};
         bgd0.layout     = bgl0;
@@ -714,6 +738,41 @@ static void rebuildBindGroups(WebGpuRdp::Implementation& I) {
         bgd2.entries    = entries2;
         I.bg_uber_g2 = wgpuDeviceCreateBindGroup(I.device, &bgd2);
         wgpuBindGroupLayoutRelease(bgl2);
+    }
+
+    // ----- tmem_update bind groups (created once, not fb-dependent) -----
+    if (I.pl_tmemUpdate) {
+        auto releaseBG = [](WGPUBindGroup& bg){ if(bg){ wgpuBindGroupRelease(bg); bg=nullptr; } };
+        releaseBG(I.bg_tmem_g0);
+        releaseBG(I.bg_tmem_g1);
+        releaseBG(I.bg_tmem_g2);
+
+        WGPUBindGroupLayout bgl_t0 = wgpuComputePipelineGetBindGroupLayout(I.pl_tmemUpdate, 0);
+        WGPUBindGroupEntry te0[3] = {
+            bufEntry(0, I.rdramBuf,   RDRAM_SIZE),
+            bufEntry(1, I.tmem16Buf,  2048u * 4u),
+            bufEntry(2, I.tmemBuf,    256u * 4096u),
+        };
+        WGPUBindGroupDescriptor btd0 = {};
+        btd0.layout = bgl_t0; btd0.entryCount = 3; btd0.entries = te0;
+        I.bg_tmem_g0 = wgpuDeviceCreateBindGroup(I.device, &btd0);
+        wgpuBindGroupLayoutRelease(bgl_t0);
+
+        // @group(1) @binding(0): UploadInfos uniform buffer
+        WGPUBindGroupLayout bgl_t1 = wgpuComputePipelineGetBindGroupLayout(I.pl_tmemUpdate, 1);
+        WGPUBindGroupEntry te1[1] = { bufEntry(0, I.tmemUploadInfosBuf, 16384) };
+        WGPUBindGroupDescriptor btd1 = {};
+        btd1.layout = bgl_t1; btd1.entryCount = 1; btd1.entries = te1;
+        I.bg_tmem_g1 = wgpuDeviceCreateBindGroup(I.device, &btd1);
+        wgpuBindGroupLayoutRelease(bgl_t1);
+
+        // @group(2) @binding(0): registers {num_uploads}
+        WGPUBindGroupLayout bgl_t2 = wgpuComputePipelineGetBindGroupLayout(I.pl_tmemUpdate, 2);
+        WGPUBindGroupEntry te2[1] = { bufEntry(0, I.tmemRegsBuf, 256) };
+        WGPUBindGroupDescriptor btd2 = {};
+        btd2.layout = bgl_t2; btd2.entryCount = 1; btd2.entries = te2;
+        I.bg_tmem_g2 = wgpuDeviceCreateBindGroup(I.device, &btd2);
+        wgpuBindGroupLayoutRelease(bgl_t2);
     }
 
     I.bindGroupFbAddr  = I.fbAddr;
@@ -810,6 +869,38 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
 
     // Skip dispatch if no primitives (nothing to render).
     if (numPrims == 0) return;
+
+    // --- Pass 0: tmem_update (upload textures from RDRAM into TMEMInstances) ---
+    // Run if tmem_update pipeline is available and there are texture uploads.
+    auto& P2 = I.parser;
+    if (I.pl_tmemUpdate && I.bg_tmem_g0 &&
+        !P2.tmem_upload_infos.empty()) {
+        // Upload UploadInfo array and register count.
+        u32 numUploads = (u32)P2.tmem_upload_infos.size();
+        wgpuQueueWriteBuffer(I.queue, I.tmemUploadInfosBuf, 0,
+            P2.tmem_upload_infos.data(),
+            numUploads * sizeof(RDP::UploadInfo));
+        u32 regs[1] = { numUploads };
+        wgpuQueueWriteBuffer(I.queue, I.tmemRegsBuf, 0, regs, sizeof(regs));
+
+        WGPUCommandEncoderDescriptor tEncDesc = {};
+        WGPUCommandEncoder tEnc = wgpuDeviceCreateCommandEncoder(I.device, &tEncDesc);
+        WGPUComputePassDescriptor tPassDesc = {};
+        tPassDesc.label = "tmem_update";
+        WGPUComputePassEncoder tPass = wgpuCommandEncoderBeginComputePass(tEnc, &tPassDesc);
+        wgpuComputePassEncoderSetPipeline(tPass, I.pl_tmemUpdate);
+        wgpuComputePassEncoderSetBindGroup(tPass, 0, I.bg_tmem_g0, 0, nullptr);
+        wgpuComputePassEncoderSetBindGroup(tPass, 1, I.bg_tmem_g1, 0, nullptr);
+        wgpuComputePassEncoderSetBindGroup(tPass, 2, I.bg_tmem_g2, 0, nullptr);
+        // 2048 threads / 64 threads-per-workgroup = 32 workgroups
+        wgpuComputePassEncoderDispatchWorkgroups(tPass, 32, 1, 1);
+        wgpuComputePassEncoderEnd(tPass);
+        wgpuComputePassEncoderRelease(tPass);
+        WGPUCommandBuffer tCmd = wgpuCommandEncoderFinish(tEnc, nullptr);
+        wgpuQueueSubmit(I.queue, 1, &tCmd);
+        wgpuCommandBufferRelease(tCmd);
+        wgpuCommandEncoderRelease(tEnc);
+    }
 
     // --- Compute dispatch dimensions ---
 
@@ -959,19 +1050,52 @@ auto WebGpuRdp::render() -> bool {
 
 auto WebGpuRdp::scanoutAsync(bool /*field*/) -> bool {
     if (!implementation) return false;
-    // Mark that a new frame is ready for scanout.
-    // CPU-side scanout reads RDRAM directly (see mapScanoutRead).
-    return (implementation->viOrigin != 0 && implementation->viWidth != 0);
+    auto& I = *implementation;
+    if (I.viOrigin == 0 || I.viWidth == 0) return false;
+
+    if (!I.gpuRenderingActive) {
+        // Software path: RDRAM has already been written by the SW RDP.
+        return true;
+    }
+
+    // GPU path: copy rdramBuf → readbackBuf, then map async for CPU access.
+    // Unmap first in case it was left mapped from a previous frame.
+    if (I.readbackReady) {
+        wgpuBufferUnmap(I.readbackBuf);
+        I.readbackReady = false;
+        I.readbackPtr   = nullptr;
+    }
+
+    WGPUCommandEncoderDescriptor encDesc = {};
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(I.device, &encDesc);
+    wgpuCommandEncoderCopyBufferToBuffer(enc, I.rdramBuf, 0, I.readbackBuf, 0, RDRAM_SIZE);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, nullptr);
+    wgpuQueueSubmit(I.queue, 1, &cmd);
+    wgpuCommandBufferRelease(cmd);
+    wgpuCommandEncoderRelease(enc);
+
+    // Async map with ASYNCIFY yield loop.
+    struct MapCtx { bool done; };
+    MapCtx ctx = { false };
+    wgpuBufferMapAsync(I.readbackBuf, WGPUMapMode_Read, 0, RDRAM_SIZE,
+        [](WGPUBufferMapAsyncStatus /*status*/, void* ud) {
+            static_cast<MapCtx*>(ud)->done = true;
+        }, &ctx);
+    while (!ctx.done) emscripten_sleep(0);
+
+    const void* ptr = wgpuBufferGetConstMappedRange(I.readbackBuf, 0, RDRAM_SIZE);
+    if (ptr) {
+        I.readbackPtr   = static_cast<const uint8_t*>(ptr);
+        I.readbackReady = true;
+    }
+    return I.readbackReady;
 }
 
 // ---------------------------------------------------------------------------
 // mapScanoutRead / unmapScanoutRead / endScanout
 //
-// Phase 2 implementation: read the VI framebuffer directly from CPU-side RDRAM,
-// converting to RGBA8888 — identical to vi.cpp's software path but driven
-// through the WebGpuRdp interface so vi.cpp can stay in the WEBGPU branch.
-// When the full GPU rendering pipeline is active (gpuRenderingActive == true),
-// swap this for the GPU readback path.
+// When gpuRenderingActive: reads from the GPU readback buffer mapped in
+// scanoutAsync().  Otherwise: reads CPU-side RDRAM directly.
 // ---------------------------------------------------------------------------
 
 auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void {
@@ -1002,13 +1126,23 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
     I.scanoutBuf.resize(scanWidth * dispHeight * 4);
     u8* dst = I.scanoutBuf.data();
 
+    // When GPU rendering has produced a readback, read from the mapped GPU
+    // buffer.  Otherwise fall back to CPU-side RDRAM.
+    const uint8_t* src = (I.readbackReady && I.readbackPtr) ? I.readbackPtr : nullptr;
+
     if (colorDepth == 3) {
         // RGBA8888 (32 bpp) — one 32-bit word per pixel, big-endian.
         for (u32 y = 0; y < dispHeight; y++) {
             for (u32 x = 0; x < scanWidth; x++) {
                 u32 addr = origin + (y * scanWidth + x) * 4;
                 if (addr + 3 >= RDRAM_SIZE) { dst[0]=dst[1]=dst[2]=dst[3]=0; dst+=4; continue; }
-                u32 word = rdram.ram.read<Word>(addr, RBusDevice::VI_DMA);
+                u32 word;
+                if (src) {
+                    word = (u32(src[addr])   << 24) | (u32(src[addr+1]) << 16) |
+                           (u32(src[addr+2]) <<  8) |  u32(src[addr+3]);
+                } else {
+                    word = rdram.ram.read<Word>(addr, RBusDevice::VI_DMA);
+                }
                 dst[0] = (word >> 24) & 0xFF;  // R
                 dst[1] = (word >> 16) & 0xFF;  // G
                 dst[2] = (word >>  8) & 0xFF;  // B
@@ -1023,7 +1157,14 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
                 u32 addr16 = origin / 2 + y * scanWidth + x;
                 u32 wordAddr = (addr16 & ~1u) * 2;
                 if (wordAddr + 3 >= RDRAM_SIZE) { dst[0]=dst[1]=dst[2]=dst[3]=0; dst+=4; continue; }
-                u32 word16 = rdram.ram.read<Half>(addr16 ^ 1, RBusDevice::VI_DMA);
+                u16 word16;
+                if (src) {
+                    // GPU readback buffer is a byte-array copy of RDRAM (big-endian N64).
+                    u32 byteAddr = addr16 * 2;
+                    word16 = u16((u32(src[byteAddr]) << 8) | src[byteAddr + 1]);
+                } else {
+                    word16 = rdram.ram.read<Half>(addr16 ^ 1, RBusDevice::VI_DMA);
+                }
                 dst[0] = (u8)(((word16 >> 11) & 0x1F) << 3);
                 dst[1] = (u8)(((word16 >>  6) & 0x1F) << 3);
                 dst[2] = (u8)(((word16 >>  1) & 0x1F) << 3);
@@ -1041,7 +1182,13 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
 }
 
 auto WebGpuRdp::unmapScanoutRead() -> void {
-    // CPU-side buffer — no unmap needed.
+    if (!implementation) return;
+    auto& I = *implementation;
+    if (I.readbackReady) {
+        wgpuBufferUnmap(I.readbackBuf);
+        I.readbackReady = false;
+        I.readbackPtr   = nullptr;
+    }
 }
 
 auto WebGpuRdp::endScanout() -> void {
