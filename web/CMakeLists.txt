@@ -58,6 +58,8 @@ foreach(SHADER ${SHADER_FILES})
 endforeach()
 
 file(WRITE "${SHADER_HEADER}" "${_shader_header_content}")
+# Also write to source tree so __has_include finds it without a prior cmake run.
+file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/shader_sources.h" "${_shader_header_content}")
 
 # Force regeneration when any shader changes.
 foreach(SHADER ${SHADER_FILES})
@@ -137,7 +139,8 @@ target_include_directories(ares-web
   PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/thirdparty
-    ${CMAKE_CURRENT_BINARY_DIR}   # for generated/shader_sources.h
+    ${CMAKE_CURRENT_SOURCE_DIR}   # fallback: web/generated/shader_sources.h in source tree
+    ${CMAKE_CURRENT_BINARY_DIR}   # primary: generated/shader_sources.h in build tree
 )
 
 # Define WEBGPU so the #if defined(WEBGPU) guards in vi.cpp, render.cpp, etc.

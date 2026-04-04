@@ -664,11 +664,12 @@ static void rebuildBindGroups(WebGpuRdp::Implementation& I) {
     // ----- Pass 2: tile_binning -----
     {
         WGPUBindGroupLayout bgl0 = wgpuComputePipelineGetBindGroupLayout(I.pl_tileBinning, 0);
+        // tile_binning.wgsl uses sparse bindings: 0,1,3,4 (no binding 2).
         WGPUBindGroupEntry entries0[4] = {
             bufEntry(0, I.triangleSetupBuf,     SZ_TRIANGLE_SETUP),
             bufEntry(1, I.scissorStateBuf,      SZ_SCISSOR_STATE),
-            bufEntry(2, I.tileBitmaskBuf,       SZ_TILE_BITMASK),
-            bufEntry(3, I.tileBitmaskCoarseBuf, SZ_TILE_BITMASK_COARSE),
+            bufEntry(3, I.tileBitmaskBuf,       SZ_TILE_BITMASK),
+            bufEntry(4, I.tileBitmaskCoarseBuf, SZ_TILE_BITMASK_COARSE),
         };
         WGPUBindGroupDescriptor bgd0 = {};
         bgd0.layout     = bgl0;
@@ -705,11 +706,11 @@ static void rebuildBindGroups(WebGpuRdp::Implementation& I) {
         wgpuBindGroupLayoutRelease(bgl0);
 
         WGPUBindGroupLayout bgl1 = wgpuComputePipelineGetBindGroupLayout(I.pl_ubershader, 1);
-        WGPUBindGroupEntry entries1[13] = {
+        // ubershader.wgsl group(1) uses bindings 0-2, 4-12 (no binding 3 / scissor).
+        WGPUBindGroupEntry entries1[12] = {
             bufEntry( 0, I.triangleSetupBuf,         SZ_TRIANGLE_SETUP),
             bufEntry( 1, I.attributeSetupBuf,        SZ_ATTRIBUTE_SETUP),
             bufEntry( 2, I.derivedSetupBuf,          SZ_DERIVED_SETUP),
-            bufEntry( 3, I.scissorStateBuf,          SZ_SCISSOR_STATE),
             bufEntry( 4, I.staticRasterStateBuf,     SZ_STATIC_RASTER),
             bufEntry( 5, I.depthBlendStateBuf,       SZ_DEPTH_BLEND),
             bufEntry( 6, I.stateIndicesBuf,          SZ_STATE_INDICES),
@@ -722,7 +723,7 @@ static void rebuildBindGroups(WebGpuRdp::Implementation& I) {
         };
         WGPUBindGroupDescriptor bgd1 = {};
         bgd1.layout     = bgl1;
-        bgd1.entryCount = 13;
+        bgd1.entryCount = 12;
         bgd1.entries    = entries1;
         I.bg_uber_g1 = wgpuDeviceCreateBindGroup(I.device, &bgd1);
         wgpuBindGroupLayoutRelease(bgl1);
