@@ -45,10 +45,35 @@ const input = {
 // ── Module initialisation ──────────────────────────────────────────────────
 
 async function initModule() {
+  // Request a WebGPU device from within this Worker context.
+  // Workers can access navigator.gpu directly in Chrome/Chromium.
+  // The device is passed to the WASM module via preinitializedWebGPUDevice
+  // so that emscripten_webgpu_get_device() returns it.
+  let gpuDevice = null;
+  if (typeof navigator !== 'undefined' && navigator.gpu) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      if (adapter) {
+        gpuDevice = await adapter.requestDevice({
+          requiredLimits: {
+            maxStorageBufferBindingSize: 256 * 1024 * 1024,
+            maxBufferSize:               256 * 1024 * 1024,
+          },
+        });
+        console.info('[emu-worker] WebGPU device acquired');
+      } else {
+        console.warn('[emu-worker] No WebGPU adapter — software renderer active');
+      }
+    } catch (e) {
+      console.warn('[emu-worker] WebGPU init failed:', e);
+    }
+  }
+
   M = await AresN64Module({
     print:    () => {},
     printErr: (t) => console.warn('[wasm]', t),
     onAbort:  (w) => self.postMessage({ type: 'abort', error: String(w) }),
+    preinitializedWebGPUDevice: gpuDevice,
   });
 
   M._ares_init();
