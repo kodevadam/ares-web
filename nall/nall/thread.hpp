@@ -93,7 +93,10 @@ inline auto thread::exit() -> void {
 }
 
 inline auto thread::setName(string name) -> void {
-#if defined(__APPLE__)
+#if defined(__EMSCRIPTEN__) || defined(ARCHITECTURE_WASM32)
+  // WASM: pthread_setname_np is not available without Emscripten thread support
+  (void)name;
+#elif defined(__APPLE__)
   pthread_setname_np(name);
 #else
   pthread_setname_np(pthread_self(), name);

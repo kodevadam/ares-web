@@ -72,6 +72,16 @@ namespace nall {
     static constexpr bool Linux   = 0;
     static constexpr bool BSD     = 0;
   };
+#elif defined(__EMSCRIPTEN__)
+  // Emscripten/WebAssembly — treated as a Linux-like POSIX platform.
+  #define PLATFORM_LINUX
+  struct Platform {
+    static constexpr bool Windows = 0;
+    static constexpr bool MacOS   = 0;
+    static constexpr bool Android = 0;
+    static constexpr bool Linux   = 1;
+    static constexpr bool BSD     = 0;
+  };
 #elif defined(linux) || defined(__linux__)
   #define PLATFORM_LINUX
   struct Platform {
@@ -255,6 +265,19 @@ namespace nall {
     static constexpr bool rv64  = 0;
     static constexpr bool rv32  = 1;
   };
+#elif defined(__wasm__) || defined(__wasm32__) || defined(__EMSCRIPTEN__)
+  // WebAssembly / Emscripten — treated as a 32-bit little-endian architecture.
+  #define ARCHITECTURE_WASM32
+  struct Architecture {
+    static constexpr bool x86   = 0;
+    static constexpr bool amd64 = 0;
+    static constexpr bool arm64 = 0;
+    static constexpr bool arm32 = 0;
+    static constexpr bool ppc64 = 0;
+    static constexpr bool ppc32 = 0;
+    static constexpr bool rv64  = 0;
+    static constexpr bool rv32  = 0;
+  };
 #else
   #error "unable to detect architecture"
 #endif
@@ -265,7 +288,7 @@ namespace nall {
 
 /* Endian detection */
 
-#if (defined(__BYTE_ORDER) && defined(__LITTLE_ENDIAN) && __BYTE_ORDER == __LITTLE_ENDIAN) || defined(__LITTLE_ENDIAN__) || defined(__i386__) || defined(__amd64__) || defined(_M_IX86) || defined(_M_AMD64) || defined(_M_ARM64)
+#if (defined(__BYTE_ORDER) && defined(__LITTLE_ENDIAN) && __BYTE_ORDER == __LITTLE_ENDIAN) || defined(__LITTLE_ENDIAN__) || defined(__i386__) || defined(__amd64__) || defined(_M_IX86) || defined(_M_AMD64) || defined(_M_ARM64) || defined(__EMSCRIPTEN__) || defined(__wasm__)
   #define ENDIAN_LITTLE
   struct Endian {
     static constexpr bool Little = 1;

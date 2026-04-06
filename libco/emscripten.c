@@ -16,6 +16,7 @@
 #include <emscripten/fiber.h>
 #include <stdlib.h>
 #include <string.h>
+#include "libco.h"
 
 #ifndef LIBCO_STACKSIZE
   #define LIBCO_STACKSIZE (1 * 1024 * 1024)
@@ -78,8 +79,8 @@ cothread_t co_derive(void* memory, unsigned int size, void (*entry)(void)) {
   return (cothread_t)fiber;
 }
 
-cothread_t co_create(unsigned int size, void (*entry)(void), unsigned int* out_size) {
-  (void)size; (void)out_size;
+cothread_t co_create(unsigned int size, void (*entry)(void)) {
+  (void)size;
   return co_derive(NULL, 0, entry);
 }
 

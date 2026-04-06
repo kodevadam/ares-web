@@ -39,7 +39,7 @@ struct ControllerState {
 
 struct WebPlatform : ares::Platform {
   WebPlatform();
-  ~WebPlatform() override;
+  ~WebPlatform();
 
   // ares::Platform interface
   auto pak(ares::Node::Object) -> std::shared_ptr<vfs::directory> override;

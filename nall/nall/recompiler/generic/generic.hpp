@@ -67,4 +67,16 @@ namespace nall::recompiler {
     #include "encoder-calls.hpp"
   };
 }
+#else
+// Stub: sljit not available (e.g. WebAssembly). The recompiler is unsupported;
+// accuracy.hpp gates on !recompiler::generic::supported to force interpreter mode.
+// The struct must still be constructible with a bump_allocator ref so that
+// N64 CPU/RSP structs that inherit from it compile without changes.
+namespace nall::recompiler {
+  struct generic {
+    static constexpr bool supported = false;
+    bump_allocator& allocator;
+    generic(bump_allocator& alloc) : allocator(alloc) {}
+  };
+}
 #endif

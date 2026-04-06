@@ -1,3 +1,4 @@
+#if !defined(__EMSCRIPTEN__)
 auto CPU::Recompiler::pool(u32 address) -> Pool* {
   auto& pool = pools[address >> 8 & 0x1fffff];
   if(!pool) {
@@ -1849,3 +1850,4 @@ auto CPU::Recompiler::emitCOP2(u32 instruction) -> bool {
 #undef i16
 #undef n16
 #undef n26
+#endif // !defined(__EMSCRIPTEN__)

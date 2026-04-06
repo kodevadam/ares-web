@@ -105,8 +105,8 @@ auto WebPlatform::input(ares::Node::Input::Input node) -> void {
   // Determine which port this input belongs to by walking up the tree.
   // The N64 controller ports are named "Controller Port 1"…"Controller Port 4".
   u32 port = 0;
-  if(auto parent = node->parent()) {
-    auto grandparent = parent->parent();
+  if(auto parent = node->parent().lock()) {
+    auto grandparent = parent->parent().lock();
     if(grandparent) {
       auto gname = grandparent->name();
       if(gname == "Controller Port 1") port = 0;

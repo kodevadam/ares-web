@@ -69,9 +69,10 @@ enum ButtonID : u32 {
 // Module-level state
 // ---------------------------------------------------------------------------
 
-static WebPlatform*    s_platform = nullptr;
+static WebPlatform*    s_platform  = nullptr;
 static ares::Node::System s_root;
-static bool            s_loaded   = false;
+static bool            s_loaded    = false;
+static u32             s_frameCount = 0;
 
 // ROM buffer held alive for the session (mia pak holds a view into it).
 static std::vector<u8> s_romBuffer;
@@ -338,8 +339,6 @@ void ares_consume_audio(u32 frames) {
 // ---------------------------------------------------------------------------
 // Remote Testing API (Phase 5)
 // ---------------------------------------------------------------------------
-
-static u32 s_frameCount = 0;
 
 EMSCRIPTEN_KEEPALIVE
 u32 ares_get_frame_number() {

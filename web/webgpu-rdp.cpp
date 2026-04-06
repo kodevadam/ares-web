@@ -19,12 +19,11 @@
 //     gpuRenderingActive; CPU RDRAM fallback used otherwise
 //
 // Emscripten notes:
-//   • Build requires -s USE_WEBGPU=1 -s ASYNCIFY
+//   • Build requires --use-port=emdawnwebgpu -s ASYNCIFY
 //   • JS must set Module.preinitializedWebGPUDevice before calling ares_init()
 //   • emscripten_sleep(0) yields to the event loop (ASYNCIFY-safe)
 
 #include <emscripten/emscripten.h>
-#include <emscripten/html5_webgpu.h>
 #include <webgpu/webgpu.h>
 
 #include <string.h>
@@ -103,16 +102,16 @@ static constexpr u32 RDP_MAX_DEPTH_BLEND_STATES      = 64;
 static constexpr u32 RDP_MAX_TILE_INFO_STATES        = 256;  // = MaxPrimitives
 
 // Buffer sizes (bytes)
-static constexpr u64 SZ_TRIANGLE_SETUP    = RDP_MAX_PRIMITIVES           * sizeof(RDP::TriangleSetup);       // 256*32  = 8192
-static constexpr u64 SZ_ATTRIBUTE_SETUP   = RDP_MAX_PRIMITIVES           * sizeof(RDP::AttributeSetup);      // 256*128 = 32768
+static constexpr u64 SZ_TRIANGLE_SETUP    = RDP_MAX_PRIMITIVES           * sizeof(::RDP::TriangleSetup);       // 256*32  = 8192
+static constexpr u64 SZ_ATTRIBUTE_SETUP   = RDP_MAX_PRIMITIVES           * sizeof(::RDP::AttributeSetup);      // 256*128 = 32768
 static constexpr u64 SZ_DERIVED_SETUP     = 16384;   // 256*56=14336, padded to 16384
-static constexpr u64 SZ_SCISSOR_STATE     = RDP_MAX_PRIMITIVES           * sizeof(RDP::ScissorState);        // 256*16  = 4096
-static constexpr u64 SZ_STATIC_RASTER     = RDP_MAX_STATIC_RASTER_STATES * sizeof(RDP::StaticRasterizationState); // 64*32 = 2048
-static constexpr u64 SZ_DEPTH_BLEND       = RDP_MAX_DEPTH_BLEND_STATES   * sizeof(RDP::DepthBlendState);     // 64*16  = 1024
-static constexpr u64 SZ_TILE_INFO         = RDP_MAX_TILE_INFO_STATES      * sizeof(RDP::TileInfo);            // 256*32 = 8192
-static constexpr u64 SZ_STATE_INDICES     = RDP_MAX_PRIMITIVES           * sizeof(RDP::InstanceIndices);     // 256*16 = 4096
-static constexpr u64 SZ_SPAN_INFO_OFFSETS = RDP_MAX_PRIMITIVES           * sizeof(RDP::SpanInfoOffsets);     // 256*16 = 4096
-static constexpr u64 SZ_SPAN_INTERP_JOBS  = RDP_MAX_SPAN_SETUPS          * sizeof(RDP::SpanInterpolationJob); // 32768*8 = 262144
+static constexpr u64 SZ_SCISSOR_STATE     = RDP_MAX_PRIMITIVES           * sizeof(::RDP::ScissorState);        // 256*16  = 4096
+static constexpr u64 SZ_STATIC_RASTER     = RDP_MAX_STATIC_RASTER_STATES * sizeof(::RDP::StaticRasterizationState); // 64*32 = 2048
+static constexpr u64 SZ_DEPTH_BLEND       = RDP_MAX_DEPTH_BLEND_STATES   * sizeof(::RDP::DepthBlendState);     // 64*16  = 1024
+static constexpr u64 SZ_TILE_INFO         = RDP_MAX_TILE_INFO_STATES      * sizeof(::RDP::TileInfo);            // 256*32 = 8192
+static constexpr u64 SZ_STATE_INDICES     = RDP_MAX_PRIMITIVES           * sizeof(::RDP::InstanceIndices);     // 256*16 = 4096
+static constexpr u64 SZ_SPAN_INFO_OFFSETS = RDP_MAX_PRIMITIVES           * sizeof(::RDP::SpanInfoOffsets);     // 256*16 = 4096
+static constexpr u64 SZ_SPAN_INTERP_JOBS  = RDP_MAX_SPAN_SETUPS          * sizeof(::RDP::SpanInterpolationJob); // 32768*8 = 262144
 static constexpr u64 SZ_SPAN_SETUPS       = RDP_MAX_SPAN_SETUPS          * 64;                               // 32768*64 = 2097152
 // tileBitmask: (MaxPrimitives/32) bitmask planes × MaxTilesX × MaxTilesY × 4 bytes
 static constexpr u64 SZ_TILE_BITMASK      = (RDP_MAX_PRIMITIVES / 32) * RDP_MAX_TILES_X * RDP_MAX_TILES_Y * 4; // 8*128*128*4 = 524288
@@ -125,18 +124,19 @@ static constexpr u64 SZ_BLENDER_LUT       = 0x8000;    // 32768 bytes
 
 static WGPUShaderModule createShaderModule(WGPUDevice dev, const char* wgsl) {
     if (!wgsl || wgsl[0] == '\0') return nullptr;
-    WGPUShaderModuleWGSLDescriptor wgslDesc = {};
-    wgslDesc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-    wgslDesc.code = wgsl;
+    // Dawn emdawnwebgpu uses WGPUShaderSourceWGSL + WGPUStringView (WGPU_STRLEN = null-terminated sentinel)
+    WGPUShaderSourceWGSL wgslDesc = {};
+    wgslDesc.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgslDesc.code = {wgsl, WGPU_STRLEN};
     WGPUShaderModuleDescriptor desc = {};
     desc.nextInChain = &wgslDesc.chain;
     return wgpuDeviceCreateShaderModule(dev, &desc);
 }
 
 static WGPUBuffer createBuffer(WGPUDevice dev, const char* label,
-                               u64 size, WGPUBufferUsageFlags usage) {
+                               u64 size, WGPUBufferUsage usage) {
     WGPUBufferDescriptor desc = {};
-    desc.label              = label;
+    desc.label              = {label, WGPU_STRLEN};
     desc.size               = size;
     desc.usage              = usage;
     desc.mappedAtCreation   = false;
@@ -151,7 +151,7 @@ static WGPUComputePipeline createComputePipeline(WGPUDevice dev,
     WGPUComputePipelineDescriptor desc = {};
     desc.layout             = layout;
     desc.compute.module     = mod;
-    desc.compute.entryPoint = entry;
+    desc.compute.entryPoint = {entry, WGPU_STRLEN};
     return wgpuDeviceCreateComputePipeline(dev, &desc);
 }
 
@@ -332,6 +332,13 @@ auto WebGpuRdp::load(Node::Object) -> bool {
 
     // --- Create persistent GPU buffers ---
     using BU = WGPUBufferUsage;
+    constexpr WGPUBufferUsage BU_Storage  = WGPUBufferUsage_Storage;
+    constexpr WGPUBufferUsage BU_CopyDst  = WGPUBufferUsage_CopyDst;
+    constexpr WGPUBufferUsage BU_CopySrc  = WGPUBufferUsage_CopySrc;
+    constexpr WGPUBufferUsage BU_MapWrite = WGPUBufferUsage_MapWrite;
+    constexpr WGPUBufferUsage BU_MapRead  = WGPUBufferUsage_MapRead;
+    constexpr WGPUBufferUsage BU_Uniform  = WGPUBufferUsage_Uniform;
+    constexpr WGPUBufferUsage BU_Indirect = WGPUBufferUsage_Indirect;
     I.rdramBuf = createBuffer(I.device, "RDRAM",
         RDRAM_SIZE,
         BU_Storage | BU_CopyDst | BU_CopySrc);
@@ -385,7 +392,7 @@ auto WebGpuRdp::load(Node::Object) -> bool {
 
     // Upload the blender divider LUT immediately (static data from luts.hpp).
     wgpuQueueWriteBuffer(I.queue, I.blenderDividerLUTBuf, 0,
-        RDP::blender_lut, SZ_BLENDER_LUT);
+        ::RDP::blender_lut, SZ_BLENDER_LUT);
 
     // --- Allocate small UBO buffers ---
     // WebGPU requires uniform buffers to be at least 256 bytes aligned for
@@ -880,14 +887,14 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         u32 numUploads = (u32)P2.tmem_upload_infos.size();
         wgpuQueueWriteBuffer(I.queue, I.tmemUploadInfosBuf, 0,
             P2.tmem_upload_infos.data(),
-            numUploads * sizeof(RDP::UploadInfo));
+            numUploads * sizeof(::RDP::UploadInfo));
         u32 regs[1] = { numUploads };
         wgpuQueueWriteBuffer(I.queue, I.tmemRegsBuf, 0, regs, sizeof(regs));
 
         WGPUCommandEncoderDescriptor tEncDesc = {};
         WGPUCommandEncoder tEnc = wgpuDeviceCreateCommandEncoder(I.device, &tEncDesc);
         WGPUComputePassDescriptor tPassDesc = {};
-        tPassDesc.label = "tmem_update";
+        tPassDesc.label = {"tmem_update", WGPU_STRLEN};
         WGPUComputePassEncoder tPass = wgpuCommandEncoderBeginComputePass(tEnc, &tPassDesc);
         wgpuComputePassEncoderSetPipeline(tPass, I.pl_tmemUpdate);
         wgpuComputePassEncoderSetBindGroup(tPass, 0, I.bg_tmem_g0, 0, nullptr);
@@ -928,7 +935,7 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
     // Computes per-span attribute interpolation for all primitives.
     {
         WGPUComputePassDescriptor passDesc = {};
-        passDesc.label = "span_setup";
+        passDesc.label = {"span_setup", WGPU_STRLEN};
         WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, I.pl_spanSetup);
         wgpuComputePassEncoderSetBindGroup(pass, 0, I.bg_spanSetup_g0, 0, nullptr);
@@ -943,7 +950,7 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
     // Builds per-tile primitive bitmasks for the ubershader.
     {
         WGPUComputePassDescriptor passDesc = {};
-        passDesc.label = "tile_binning";
+        passDesc.label = {"tile_binning", WGPU_STRLEN};
         WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, I.pl_tileBinning);
         wgpuComputePassEncoderSetBindGroup(pass, 0, I.bg_tileBin_g0, 0, nullptr);
@@ -959,7 +966,7 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
     // are visible to subsequent dispatches — no explicit barrier needed.
     {
         WGPUComputePassDescriptor passDesc = {};
-        passDesc.label = "ubershader";
+        passDesc.label = {"ubershader", WGPU_STRLEN};
         WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &passDesc);
         wgpuComputePassEncoderSetPipeline(pass, I.pl_ubershader);
         wgpuComputePassEncoderSetBindGroup(pass, 0, I.bg_uber_g0, 0, nullptr);
@@ -1076,12 +1083,17 @@ auto WebGpuRdp::scanoutAsync(bool /*field*/) -> bool {
     wgpuCommandEncoderRelease(enc);
 
     // Async map with ASYNCIFY yield loop.
+    // Dawn emdawnwebgpu: wgpuBufferMapAsync takes WGPUBufferMapCallbackInfo
+    // with a 4-arg callback (status, message, userdata1, userdata2).
     struct MapCtx { bool done; };
     MapCtx ctx = { false };
-    wgpuBufferMapAsync(I.readbackBuf, WGPUMapMode_Read, 0, RDRAM_SIZE,
-        [](WGPUBufferMapAsyncStatus /*status*/, void* ud) {
-            static_cast<MapCtx*>(ud)->done = true;
-        }, &ctx);
+    WGPUBufferMapCallbackInfo mapInfo = {};
+    mapInfo.callback = [](WGPUMapAsyncStatus /*status*/, WGPUStringView /*message*/,
+                          void* ud, void* /*ud2*/) {
+        static_cast<MapCtx*>(ud)->done = true;
+    };
+    mapInfo.userdata1 = &ctx;
+    wgpuBufferMapAsync(I.readbackBuf, WGPUMapMode_Read, 0, RDRAM_SIZE, mapInfo);
     while (!ctx.done) emscripten_sleep(0);
 
     const void* ptr = wgpuBufferGetConstMappedRange(I.readbackBuf, 0, RDRAM_SIZE);

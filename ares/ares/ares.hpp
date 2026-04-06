@@ -1,7 +1,9 @@
 #pragma once
 
 #include <libco/libco.h>
+#if !defined(__EMSCRIPTEN__)
 #include <sljit.h>
+#endif
 
 #include <vector>
 #include <ranges>

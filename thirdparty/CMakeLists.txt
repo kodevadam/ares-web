@@ -1,8 +1,15 @@
-add_library(sljit STATIC sljit/sljit_src/sljitLir.c)
-
-target_include_directories(sljit PUBLIC ../thirdparty)
-target_compile_definitions(sljit PUBLIC SLJIT_HAVE_CONFIG_PRE=1 SLJIT_HAVE_CONFIG_POST=1)
-target_compile_options(sljit PRIVATE $<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang,GNU>:-Wno-conditional-uninitialized>)
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  # sljit uses JIT codegen that isn't supported on WASM. Create a header-only
+  # interface target so dependents still compile without undefined references.
+  add_library(sljit INTERFACE)
+  target_include_directories(sljit INTERFACE ../thirdparty)
+  target_compile_definitions(sljit INTERFACE SLJIT_HAVE_CONFIG_PRE=1 SLJIT_HAVE_CONFIG_POST=1)
+else()
+  add_library(sljit STATIC sljit/sljit_src/sljitLir.c)
+  target_include_directories(sljit PUBLIC ../thirdparty)
+  target_compile_definitions(sljit PUBLIC SLJIT_HAVE_CONFIG_PRE=1 SLJIT_HAVE_CONFIG_POST=1)
+  target_compile_options(sljit PRIVATE $<$<COMPILE_LANG_AND_ID:C,AppleClang,Clang,GNU>:-Wno-conditional-uninitialized>)
+endif()
 
 option(ARES_ENABLE_CHD "Enable CHD format support via libchdr" ON)
 

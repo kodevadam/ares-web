@@ -39,6 +39,19 @@ struct float_env {
   static constexpr u32 toNearest  = 0 << 22;
   static constexpr u32 towardZero = 3 << 22;
   static constexpr u32 upward     = 1 << 22;
+#elif defined(__EMSCRIPTEN__) || defined(ARCHITECTURE_WASM32)
+  // WebAssembly has no hardware FP exception state.
+  static constexpr u32 allExcept  = 0;
+  static constexpr u32 denormal   = 0;
+  static constexpr u32 inexact    = 0;
+  static constexpr u32 underflow  = 0;
+  static constexpr u32 overflow   = 0;
+  static constexpr u32 divByZero  = 0;
+  static constexpr u32 invalid    = 0;
+  static constexpr u32 downward   = 0;
+  static constexpr u32 toNearest  = 0;
+  static constexpr u32 towardZero = 0;
+  static constexpr u32 upward     = 0;
 #else
   static constexpr u32 allExcept  = FE_ALL_EXCEPT;
 #if defined(FE_DENORMAL)

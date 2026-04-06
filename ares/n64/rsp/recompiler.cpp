@@ -1,3 +1,4 @@
+#if !defined(__EMSCRIPTEN__)
 auto RSP::Recompiler::measure(u12 address) -> u12 {
   u12 start = address;
   bool hasBranched = 0;
@@ -1294,3 +1295,4 @@ auto RSP::Recompiler::isTerminal(u32 instruction) -> bool {
 #undef n16
 #undef n26
 #undef callvu
+#endif // !defined(__EMSCRIPTEN__)

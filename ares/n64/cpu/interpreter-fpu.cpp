@@ -318,6 +318,7 @@ auto fpuFlushResult(T f, u32 roundMode) -> T
 {
   switch(roundMode)
   {
+#if !defined(__EMSCRIPTEN__)
   case float_env::toNearest: //RN
   case float_env::towardZero: //RZ
     return copysign(T(), f);
@@ -325,6 +326,10 @@ auto fpuFlushResult(T f, u32 roundMode) -> T
     return signbit(f) ? -T() : std::numeric_limits<T>::min();
   case float_env::downward: //RM
     return signbit(f) ? -std::numeric_limits<T>::min() : T();
+#else
+  default: //WASM: no FP rounding control, treat as round-to-nearest
+    return copysign(T(), f);
+#endif
   }
   unreachable;
 }

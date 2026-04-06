@@ -74,7 +74,7 @@ endforeach()
 # Initial memory: 256 MiB (enough for RDRAM + scratch).
 # ALLOW_MEMORY_GROWTH lets it expand further if needed.
 # ASYNCIFY is required by the Emscripten fiber API used in libco.
-# USE_WEBGPU=1 provides the webgpu.h C header that maps to the browser GPU API.
+# --use-port=emdawnwebgpu provides webgpu/webgpu.h and links the Dawn WebGPU JS bindings.
 # EXPORTED_RUNTIME_METHODS: expose ccall/cwrap for JS → WASM calls.
 # ENVIRONMENT=web: produce a web-only module (no Node.js shims).
 # MODULARIZE=1: wrap the output in a factory function for clean init.
@@ -94,7 +94,7 @@ set(ARES_WEB_LINK_FLAGS
   # Increase ASYNCIFY stack size (default 4096) to accommodate deeper call
   # chains in the N64 interpreter without stack overflow.
   "-s ASYNCIFY_STACK_SIZE=65536"
-  "-s USE_WEBGPU=1"
+  "--use-port=emdawnwebgpu"
   "-s ENVIRONMENT=web,worker"
   "-s MODULARIZE=1"
   "-s EXPORT_NAME=AresN64Module"
@@ -114,6 +114,7 @@ set(ARES_WEB_COMPILE_FLAGS
   "-O3"
   "-msimd128"
   "-flto"
+  "--use-port=emdawnwebgpu"  # adds webgpu/webgpu.h include path at compile time
 )
 
 # ---------------------------------------------------------------------------
@@ -124,6 +125,7 @@ add_executable(ares-web
   main-web.cpp
   platform-web.cpp
   webgpu-rdp.cpp
+  rdp-cpu-parser.cpp
 )
 
 # Pull in the ares core (N64 only — enforced by ARES_CORES=n64 in preset)
@@ -132,12 +134,14 @@ target_link_libraries(ares-web
   PRIVATE
     ares::ares
     ares::mia
+    ares::nall   # nall OBJECT library — provides Path, memory, TCP, instruction_set, etc.
     libco
 )
 
 target_include_directories(ares-web
   PRIVATE
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/nall       # nall headers (nall::nall-headers is PRIVATE in ares, doesn't propagate)
     ${CMAKE_SOURCE_DIR}/thirdparty
     ${CMAKE_CURRENT_SOURCE_DIR}   # fallback: web/generated/shader_sources.h in source tree
     ${CMAKE_CURRENT_BINARY_DIR}   # primary: generated/shader_sources.h in build tree
@@ -149,6 +153,7 @@ target_compile_definitions(ares-web
   PRIVATE
     ARES_WEB=1
     WEBGPU=1
+    MIA_LIBRARY=1   # suppress hiro GUI inclusion in mia/mia.hpp (web has no desktop GUI)
 )
 
 # Undefine VULKAN in case it leaked in from the ares N64 CMakeLists.
