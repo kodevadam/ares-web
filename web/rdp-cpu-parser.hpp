@@ -10,10 +10,11 @@
 // • Zero Vulkan dependencies: only rdp_data_structures.hpp (which only pulls
 //   in rdp_common.hpp that forward-declares Vulkan::Program / Vulkan::Shader).
 // • Mirrors the CPU-side logic of rdp_device.cpp + rdp_renderer.cpp without
-//   any GPU submission, coherency handling, or TMEM simulation.
-// • TMEM uploads are *counted* (tile_instance_index) but not simulated; the
-//   first TMEM snapshot is reused for all primitives — acceptable until a
-//   full TMEM upload path is added.
+//   any GPU submission or coherency handling.
+// • TMEM uploads: load_tile_impl() / load_tile_iteration() port the full
+//   Renderer::load_tile logic and generate RDP::UploadInfo entries in
+//   tmem_upload_infos. tile_instance_index is always 0 (the WGSL
+//   tmem_update shader writes only to TMEMInstances[0]).
 
 #pragma once
 

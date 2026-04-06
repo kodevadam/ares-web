@@ -7,16 +7,16 @@
 // This file mirrors the responsibilities of ares/n64/vulkan/vulkan.cpp but
 // targets the browser WebGPU API via Emscripten's C bindings.
 //
-// Phase 2 status:
+// Phase 2 status: COMPLETE
 //   • GPU device / buffer / pipeline infrastructure: complete
 //   • Utility compute shaders (clear_*, masked_rdram_resolve): functional
 //   • GPU dispatch wired up: span_setup → tile_binning → ubershader (3-pass)
 //   • Command parsing: full RDP command set via RdpCpuParser (rdp-cpu-parser.cpp)
 //   • Stream buffers: filled by CPU parser, uploaded to GPU on each SyncFull
-//   • TMEM uploads: counted but not simulated (initial bringup)
-//   • Scanout: CPU-direct RDRAM read (correct output without GPU rendering)
-//   • Once the complex shaders are filled in, switch scanoutAsync() to the
-//     GPU-side readback path already wired up below.
+//   • TMEM uploads: UploadInfo entries generated on each Load* command;
+//     dispatched via tmem_update compute shader before each 3-pass render
+//   • Scanout: GPU readback path (rdramBuf → readbackBuf, async map) used when
+//     gpuRenderingActive; CPU RDRAM fallback used otherwise
 //
 // Emscripten notes:
 //   • Build requires -s USE_WEBGPU=1 -s ASYNCIFY
@@ -406,9 +406,8 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     I.sm_maskedResolve  = createShaderModule(I.device, wgsl_masked_rdram_resolve);
     I.sm_extractVram    = createShaderModule(I.device, wgsl_extract_vram);
 
-    // Complex rendering shaders: compiled when source is non-empty.
-    // Phase 2: these contain stub main() bodies until Naga-transpiled
-    // WGSL is injected via tools/transpile-shaders.sh.
+    // Complex rendering shaders: compiled from embedded WGSL (Naga-transpiled).
+    // Source is embedded at build time via web/generated/shader_sources.h.
     I.sm_ubershader  = createShaderModule(I.device, wgsl_ubershader);
     I.sm_rasterizer  = createShaderModule(I.device, wgsl_rasterizer);
     I.sm_spanSetup   = createShaderModule(I.device, wgsl_span_setup);
@@ -417,7 +416,7 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     I.sm_tmemUpdate  = createShaderModule(I.device, wgsl_tmem_update);
 
     // --- Create compute pipelines (auto-layout) ---
-    // For Phase 2, use nullptr pipeline layout → let WebGPU infer from shader.
+    // Use nullptr pipeline layout → let WebGPU infer from shader (auto-layout).
     I.pl_clearWriteMask = createComputePipeline(I.device, I.sm_clearWriteMask, "main", nullptr);
     I.pl_clearIndirect  = createComputePipeline(I.device, I.sm_clearIndirect,  "main", nullptr);
     I.pl_clearSSSWM     = createComputePipeline(I.device, I.sm_clearSSSWM,     "main", nullptr);
@@ -440,7 +439,7 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     if (I.gpuRenderingActive) {
         platform->status("WebGPU enabled: paraLLEl-RDP GPU dispatch active");
     } else {
-        platform->status("WebGPU enabled: paraLLEl-RDP infrastructure ready (stub shaders)");
+        platform->status("WebGPU enabled: paraLLEl-RDP (CPU scanout fallback — shader compile failed)");
     }
     return true;
 }
@@ -793,8 +792,8 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         I.rdramDirty = false;
     }
 
-    // If GPU rendering is not active (stub shaders), submit a no-op to keep
-    // the queue alive and return.
+    // If GPU rendering is not active (shader compile failed), submit a no-op to
+    // keep the queue alive and return — CPU scanout reads RDRAM directly.
     if (!I.gpuRenderingActive) {
         WGPUCommandEncoderDescriptor encDesc = {};
         WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(I.device, &encDesc);
@@ -805,9 +804,10 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         return;
     }
 
-    u32 numPrims = I.numPrimitives;
-    u32 fbW      = (I.fbWidth  > 0) ? I.fbWidth  : 320;
-    u32 fbH      = (I.fbHeight > 0) ? I.fbHeight : 240;
+    u32 numPrims    = I.numPrimitives;
+    u32 numSpanJobs = (u32)I.parser.span_info_jobs.size();
+    u32 fbW         = (I.fbWidth  > 0) ? I.fbWidth  : 320;
+    u32 fbH         = (I.fbHeight > 0) ? I.fbHeight : 240;
 
     // --- Upload per-SyncFull stream buffers from CPU parser ---
     auto& P = I.parser;
@@ -869,7 +869,7 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
     }
 
     // Skip dispatch if no primitives (nothing to render).
-    if (numPrims == 0) return;
+    if (numPrims == 0 || numSpanJobs == 0) return;
 
     // --- Pass 0: tmem_update (upload textures from RDRAM into TMEMInstances) ---
     // Run if tmem_update pipeline is available and there are texture uploads.
@@ -933,8 +933,8 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         wgpuComputePassEncoderSetPipeline(pass, I.pl_spanSetup);
         wgpuComputePassEncoderSetBindGroup(pass, 0, I.bg_spanSetup_g0, 0, nullptr);
         wgpuComputePassEncoderSetBindGroup(pass, 1, I.bg_spanSetup_g1, 0, nullptr);
-        // Dispatch one workgroup per SpanInterpolationJob (= one per primitive for now).
-        wgpuComputePassEncoderDispatchWorkgroups(pass, numPrims, 1, 1);
+        // Dispatch one workgroup per SpanInterpolationJob (multiple per large primitive).
+        wgpuComputePassEncoderDispatchWorkgroups(pass, numSpanJobs, 1, 1);
         wgpuComputePassEncoderEnd(pass);
         wgpuComputePassEncoderRelease(pass);
     }
@@ -1193,7 +1193,7 @@ auto WebGpuRdp::unmapScanoutRead() -> void {
 }
 
 auto WebGpuRdp::endScanout() -> void {
-    // Nothing to signal in Phase 2.
+    // Nothing to signal — frame timing is managed by the JS event loop.
 }
 
 // ---------------------------------------------------------------------------
