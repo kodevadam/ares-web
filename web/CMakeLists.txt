@@ -98,7 +98,7 @@ set(ARES_WEB_LINK_FLAGS
   "-s ENVIRONMENT=web,worker"
   "-s MODULARIZE=1"
   "-s EXPORT_NAME=AresN64Module"
-  "-s EXPORTED_RUNTIME_METHODS=[ccall,cwrap,setValue,getValue,UTF8ToString,stringToUTF8]"
+  "-s EXPORTED_RUNTIME_METHODS=[ccall,cwrap,setValue,getValue,UTF8ToString,stringToUTF8,HEAPU8,HEAP8,HEAP32]"
   "-s EXPORTED_FUNCTIONS=[_malloc,_free,_ares_init,_ares_load_rom,_ares_run_frame,_ares_reset,_ares_get_framebuffer,_ares_get_framebuffer_width,_ares_get_framebuffer_height,_ares_set_button,_ares_set_axis,_ares_get_audio_sample_rate,_ares_get_audio_data,_ares_consume_audio,_ares_get_frame_number,_ares_advance_frames,_ares_get_frame_hash,_ares_is_running]"
   # FORCE_FILESYSTEM=1: enable Emscripten MEMFS so mia can write/read
   # the ROM via a virtual path (/tmp/rom.z64) and the N64 system can
