@@ -51,3 +51,4 @@ tests/m68000/tests
 thirdparty/libchdr/deps/zlib-*/zconf.h
 thirdparty/libchdr/deps/zlib-*/zconf.h.included
 __pycache__/
+tools/sourcery/sourcery
