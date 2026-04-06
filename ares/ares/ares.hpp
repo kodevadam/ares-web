@@ -61,7 +61,12 @@ namespace ares {
   }
 
   namespace Video {
+    // WASM has no video thread — render inline via Screen::refresh()
+    #if defined(__EMSCRIPTEN__)
+    static constexpr bool Threaded = false;
+    #else
     static constexpr bool Threaded = true;
+    #endif
   }
 
   namespace Constants {

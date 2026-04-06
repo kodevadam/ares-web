@@ -126,7 +126,7 @@ int ares_load_rom(const u8* data, u32 size) {
 
   // Unload any existing session.
   if(s_loaded) {
-    ares::Nintendo64::option("Enable GPU acceleration", false);
+    ares::Nintendo64::option("Enable GPU acceleration", true);
     s_root = {};
     s_loaded = false;
     s_platform->systemPak.reset();
@@ -176,7 +176,7 @@ int ares_load_rom(const u8* data, u32 size) {
   // -----------------------------------------------------------------------
   // Configure N64 options (no Vulkan/GPU in web build).
   // -----------------------------------------------------------------------
-  ares::Nintendo64::option("Enable GPU acceleration", false);
+  ares::Nintendo64::option("Enable GPU acceleration", true);
   ares::Nintendo64::option("Homebrew Mode", false);
   ares::Nintendo64::option("Recompiler", false); // interpreter-only
 
