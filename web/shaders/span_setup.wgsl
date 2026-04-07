@@ -550,9 +550,9 @@ fn main_1() {
     let _e425 = setup_2;
     xl = select(_e421, _e422, (_e423 < vec4((256i * _e425.ym))));
     let _e431 = xl;
-    xl = extractBits(_e431, 0u, 35u);
+    xl = extractBits(_e431, 0u, 32u);
     let _e437 = xh_1_;
-    xh_1_ = extractBits(_e437, 0u, 35u);
+    xh_1_ = extractBits(_e437, 0u, 32u);
     let _e443 = xh_1_;
     param_11_ = _e443;
     let _e445 = param_11_;

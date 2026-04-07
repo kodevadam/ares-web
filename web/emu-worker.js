@@ -54,10 +54,15 @@ async function initModule() {
     try {
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (adapter) {
+        const adapterLimits = adapter.limits;
+        // Request higher storage-buffer and buffer-size limits.
+        // The paraLLEl-RDP shaders use up to 13 storage buffers per stage;
+        // the WebGPU default maxStorageBuffersPerShaderStage is only 8.
         gpuDevice = await adapter.requestDevice({
           requiredLimits: {
-            maxStorageBufferBindingSize: 256 * 1024 * 1024,
-            maxBufferSize:               256 * 1024 * 1024,
+            maxStorageBufferBindingSize:    Math.min(256 * 1024 * 1024, adapterLimits.maxStorageBufferBindingSize),
+            maxBufferSize:                 Math.min(256 * 1024 * 1024, adapterLimits.maxBufferSize),
+            maxStorageBuffersPerShaderStage: Math.min(16, adapterLimits.maxStorageBuffersPerShaderStage),
           },
         });
         console.info('[emu-worker] WebGPU device acquired');
