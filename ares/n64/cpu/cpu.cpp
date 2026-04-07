@@ -35,23 +35,22 @@ auto CPU::unload() -> void {
 auto CPU::main() -> void {
 #if defined(ARES_WEB)
   // Idle loop detection: track the last two PCs to detect branch-to-self spins.
-  // When the CPU is spinning (e.g. waiting for a VI or timer interrupt) we
-  // fast-forward by stepping a batch of cycles so synchronize() can fire the
-  // pending interrupt sooner, avoiding wasted host CPU time.
   u64 prevPc = ~ipu.pc;
   u64 pprevPc = ~ipu.pc;
-  // Safety cap: each call does at most ~1 N64-second of CPU work (93.75M cycles
-  // / 2 half-clocks per step ≈ 46M iterations). We use a smaller cap so the
-  // JS event loop gets control back promptly and ASYNCIFY keeps working.
-  // If vi.refreshed fires before the cap, we exit normally (complete frame).
   static u64 s_totalIters = 0;
   u64 iters = 0;
   static constexpr u64 MAX_ITERS = 3000000ULL;
+  fprintf(stderr, "[cpu.main] enter pc=%08x vi.refreshed=%d vi.clock=%lld\n",
+    (unsigned)(ipu.pc & 0xffffffffu), (int)vi.refreshed, (long long)vi.clock);
 #endif
   while(!vi.refreshed && GDB::server.reportPC(ipu.pc & 0xFFFFFFFF)) {
 #if defined(ARES_WEB)
-    if(++iters > MAX_ITERS) {
-      // Cap hit — log diagnostics to stderr (visible as [wasm] in browser console).
+    ++iters;
+    if(iters == 1) {
+      fprintf(stderr, "[cpu.main] first instruction pc=%08x\n",
+        (unsigned)(ipu.pc & 0xffffffffu));
+    }
+    if(iters > MAX_ITERS) {
       fprintf(stderr, "[cpu.main] cap hit: total=%llu vi.clock=%lld vi.inactive=%u pc=%08x\n",
         (unsigned long long)(s_totalIters + iters),
         (long long)vi.clock,
@@ -59,7 +58,7 @@ auto CPU::main() -> void {
         (unsigned)(ipu.pc & 0xffffffffu));
       break;
     }
-    if(iters % 1000000ULL == 0) {
+    if(iters % 100000ULL == 0) {
       fprintf(stderr, "[cpu.main] iter %llu vi.clock=%lld vi.inactive=%u pc=%08x\n",
         (unsigned long long)(s_totalIters + iters),
         (long long)vi.clock,
@@ -68,15 +67,24 @@ auto CPU::main() -> void {
     }
 #endif
     instruction();
+#if defined(ARES_WEB)
+    if(iters == 1) {
+      fprintf(stderr, "[cpu.main] after first instruction pc=%08x Thread::clock=%lld\n",
+        (unsigned)(ipu.pc & 0xffffffffu), (long long)Thread::clock);
+    }
+#endif
     synchronize();
 #if defined(ARES_WEB)
+    if(iters == 1) {
+      fprintf(stderr, "[cpu.main] after first synchronize vi.clock=%lld vi.inactive=%u\n",
+        (long long)vi.clock, (unsigned)vi.inactiveCounter);
+    }
     // If PC oscillates between two values (branch + delay slot), we are in
     // an idle spin.  Only fast-forward when interrupts are globally enabled
     // and none are already pending (so we don't skip over a real event).
     if(ipu.pc == pprevPc && ipu.pc != prevPc) {
       if(scc.status.interruptEnable && !scc.status.exceptionLevel &&
          !(scc.cause.interruptPending & scc.status.interruptMask)) {
-        // Advance ~512 CPU cycles (1024 half-cycles) to let timers tick.
         step(1024);
         synchronize();
       }
@@ -87,12 +95,8 @@ auto CPU::main() -> void {
   }
 #if defined(ARES_WEB)
   s_totalIters += iters;
-  if(vi.refreshed) {
-    fprintf(stderr, "[cpu.main] frame complete: iters=%llu total=%llu vi.inactive=%u\n",
-      (unsigned long long)iters,
-      (unsigned long long)s_totalIters,
-      (unsigned)vi.inactiveCounter);
-  }
+  fprintf(stderr, "[cpu.main] exit iters=%llu total=%llu vi.refreshed=%d\n",
+    (unsigned long long)iters, (unsigned long long)s_totalIters, (int)vi.refreshed);
 #endif
 
   vi.refreshed = false;
