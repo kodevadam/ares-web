@@ -201,10 +201,11 @@ int ares_load_rom(const u8* data, u32 size) {
     }
   }
 
-  // Power on.
-  if(auto power = s_root->find<ares::Node::Setting::Boolean>("Power")) {
-    power->setValue(true);
-  }
+  // Power on — calls System::power(false) which resets all components
+  // (sets CPU PC to 0xBFC00000, initialises AI dac.period, etc.).
+  // The settings-node trick (find "Power" → setValue) only sets a boolean
+  // flag; it does NOT invoke the power callback.  Call it directly instead.
+  s_root->power(false);
 
   s_loaded = true;
   s_platform->shutdownRequested = false;
