@@ -311,7 +311,8 @@ struct WebGpuRdp::Implementation {
 // ---------------------------------------------------------------------------
 
 auto WebGpuRdp::load(Node::Object) -> bool {
-    if (!enable) return true;
+    fprintf(stderr, "[WebGpuRdp] load start (enable=%d)\n", (int)enable);
+    if (!enable) { fprintf(stderr, "[WebGpuRdp] load skip (disabled)\n"); return true; }
 
     delete implementation;
     implementation = new Implementation();
@@ -448,6 +449,8 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     } else {
         platform->status("WebGPU enabled: paraLLEl-RDP (CPU scanout fallback — shader compile failed)");
     }
+    fprintf(stderr, "[WebGpuRdp] load done (gpuActive=%d device=%p)\n",
+        (int)I.gpuRenderingActive, (void*)I.device);
     return true;
 }
 

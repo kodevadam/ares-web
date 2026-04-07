@@ -1,5 +1,6 @@
 #include <n64/n64.hpp>
 #include <nall/gdb/server.hpp>
+#include <cstdio>
 
 namespace ares::Nintendo64 {
 
@@ -39,8 +40,33 @@ auto CPU::main() -> void {
   // pending interrupt sooner, avoiding wasted host CPU time.
   u64 prevPc = ~ipu.pc;
   u64 pprevPc = ~ipu.pc;
+  // Safety cap: each call does at most ~1 N64-second of CPU work (93.75M cycles
+  // / 2 half-clocks per step ≈ 46M iterations). We use a smaller cap so the
+  // JS event loop gets control back promptly and ASYNCIFY keeps working.
+  // If vi.refreshed fires before the cap, we exit normally (complete frame).
+  static u64 s_totalIters = 0;
+  u64 iters = 0;
+  static constexpr u64 MAX_ITERS = 3000000ULL;
 #endif
   while(!vi.refreshed && GDB::server.reportPC(ipu.pc & 0xFFFFFFFF)) {
+#if defined(ARES_WEB)
+    if(++iters > MAX_ITERS) {
+      // Cap hit — log diagnostics to stderr (visible as [wasm] in browser console).
+      fprintf(stderr, "[cpu.main] cap hit: total=%llu vi.clock=%lld vi.inactive=%u pc=%08x\n",
+        (unsigned long long)(s_totalIters + iters),
+        (long long)vi.clock,
+        (unsigned)vi.inactiveCounter,
+        (unsigned)(ipu.pc & 0xffffffffu));
+      break;
+    }
+    if(iters % 1000000ULL == 0) {
+      fprintf(stderr, "[cpu.main] iter %llu vi.clock=%lld vi.inactive=%u pc=%08x\n",
+        (unsigned long long)(s_totalIters + iters),
+        (long long)vi.clock,
+        (unsigned)vi.inactiveCounter,
+        (unsigned)(ipu.pc & 0xffffffffu));
+    }
+#endif
     instruction();
     synchronize();
 #if defined(ARES_WEB)
@@ -59,6 +85,15 @@ auto CPU::main() -> void {
     prevPc  = ipu.pc;
 #endif
   }
+#if defined(ARES_WEB)
+  s_totalIters += iters;
+  if(vi.refreshed) {
+    fprintf(stderr, "[cpu.main] frame complete: iters=%llu total=%llu vi.inactive=%u\n",
+      (unsigned long long)iters,
+      (unsigned long long)s_totalIters,
+      (unsigned)vi.inactiveCounter);
+  }
+#endif
 
   vi.refreshed = false;
   queue.remove(Queue::GDB_Poll);
