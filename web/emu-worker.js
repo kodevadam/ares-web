@@ -169,9 +169,11 @@ self.onmessage = async (e) => {
       // romData arrives as a transferred ArrayBuffer.
       const bytes = new Uint8Array(msg.romData);
       const ptr   = M._malloc(bytes.byteLength);
+      console.log(`[emu-worker] loadRom: ${bytes.byteLength} bytes, ptr=${ptr}`);
       if (!ptr) { self.postMessage({ type: 'romLoaded', ok: false }); break; }
       M.HEAPU8.set(bytes, ptr);
       const ok = !!M._ares_load_rom(ptr, bytes.byteLength);
+      console.log(`[emu-worker] ares_load_rom returned: ${ok}`);
       M._free(ptr);
       self.postMessage({ type: 'romLoaded', ok });
       if (ok && !running) runLoop();
