@@ -97,6 +97,7 @@ function applyInput() {
 
 async function runLoop() {
   running = true;
+  let debugFrames = 0;
   while (running) {
     applyInput();
     M._ares_run_frame();
@@ -105,6 +106,11 @@ async function runLoop() {
     const w   = M._ares_get_framebuffer_width();
     const h   = M._ares_get_framebuffer_height();
     const ptr = M._ares_get_framebuffer();
+
+    if (debugFrames < 5) {
+      console.log(`[emu-worker] frame ${debugFrames}: w=${w} h=${h} ptr=${ptr}`);
+      debugFrames++;
+    }
     let pixels = null;
     const transfers = [];
 
