@@ -55,17 +55,27 @@ async function initModule() {
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (adapter) {
         const adapterLimits = adapter.limits;
-        // Request higher storage-buffer and buffer-size limits.
-        // The paraLLEl-RDP shaders use up to 13 storage buffers per stage;
-        // the WebGPU default maxStorageBuffersPerShaderStage is only 8.
-        gpuDevice = await adapter.requestDevice({
-          requiredLimits: {
-            maxStorageBufferBindingSize:    Math.min(256 * 1024 * 1024, adapterLimits.maxStorageBufferBindingSize),
-            maxBufferSize:                 Math.min(256 * 1024 * 1024, adapterLimits.maxBufferSize),
-            maxStorageBuffersPerShaderStage: Math.min(16, adapterLimits.maxStorageBuffersPerShaderStage),
-          },
-        });
-        console.info('[emu-worker] WebGPU device acquired');
+        // The paraLLEl-RDP ubershader uses 13 storage buffers in group(1).
+        // If the adapter can't support that many, disable GPU acceleration
+        // and let the WASM fall back to the CPU scanout path.
+        const MIN_STORAGE_BUFS = 13;
+        if (adapterLimits.maxStorageBuffersPerShaderStage < MIN_STORAGE_BUFS) {
+          console.warn(
+            `[emu-worker] GPU maxStorageBuffersPerShaderStage=${adapterLimits.maxStorageBuffersPerShaderStage}` +
+            ` < ${MIN_STORAGE_BUFS} — GPU acceleration disabled, using software renderer`
+          );
+          // gpuDevice stays null → WASM falls back to software scanout
+        } else {
+          // Request higher storage-buffer and buffer-size limits.
+          gpuDevice = await adapter.requestDevice({
+            requiredLimits: {
+              maxStorageBufferBindingSize:     Math.min(256 * 1024 * 1024, adapterLimits.maxStorageBufferBindingSize),
+              maxBufferSize:                   Math.min(256 * 1024 * 1024, adapterLimits.maxBufferSize),
+              maxStorageBuffersPerShaderStage: Math.min(16, adapterLimits.maxStorageBuffersPerShaderStage),
+            },
+          });
+          console.info('[emu-worker] WebGPU device acquired');
+        }
       } else {
         console.warn('[emu-worker] No WebGPU adapter — software renderer active');
       }
