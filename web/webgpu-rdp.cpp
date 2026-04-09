@@ -318,6 +318,25 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     implementation = new Implementation();
     auto& I = *implementation;
 
+    // Guard against calling emscripten_webgpu_get_device() when no device was
+    // preinitialized. The emdawnwebgpu glue code (importJsDevice) accesses
+    // device.queue unconditionally and crashes if Module.preinitializedWebGPUDevice
+    // is null or undefined. Use EM_ASM_INT to check the JS side first.
+    {
+        int hasDevice = EM_ASM_INT({
+            return (Module['preinitializedWebGPUDevice'] != null &&
+                    Module['preinitializedWebGPUDevice'] !== undefined) ? 1 : 0;
+        });
+        if (!hasDevice) {
+            platform->status("WebGPU unavailable: using software RDP fallback");
+            enable = false;
+            delete implementation;
+            implementation = nullptr;
+            fprintf(stderr, "[WebGpuRdp] no preinitializedWebGPUDevice — software fallback\n");
+            return true;
+        }
+    }
+
     // Obtain the pre-initialised WebGPU device from JS.
     I.device = emscripten_webgpu_get_device();
     if (!I.device) {
