@@ -107,6 +107,7 @@ auto VI::writeWord(u32 address, u32 data_, Thread& thread) -> void {
 
   if(address == 0) {
     //VI_CONTROL
+    auto prevColorDepth = io.colorDepth;
     io.colorDepth          = data.bit( 0, 1);
     io.gammaDither         = data.bit( 2);
     io.gamma               = data.bit( 3);
@@ -116,20 +117,35 @@ auto VI::writeWord(u32 address, u32 data_, Thread& thread) -> void {
     io.reserved.bit(7)     = data.bit( 7);
     io.antialias           = data.bit( 8, 9);
     io.reserved.bit(10,15) = data.bit(10,15);
+    // Always log colorDepth transitions (0→nonzero or changes), limited to first 32 total
     static int viCtrlDbg = 0;
-    if(viCtrlDbg++ < 8)
-      fprintf(stderr, "[VI_CONTROL] write=0x%08x colorDepth=%d halfLines=%u coincidence=%u\n",
-              (u32)data_, (int)io.colorDepth, (u32)io.halfLinesPerField, (u32)io.coincidence);
+    bool interesting = (prevColorDepth != io.colorDepth) || (io.colorDepth != 0 && viCtrlDbg < 4);
+    if(viCtrlDbg < 32 || interesting) {
+      if(interesting || viCtrlDbg < 8)
+        fprintf(stderr, "[VI_CONTROL#%d] write=0x%08x colorDepth=%d->%d dramAddr=0x%06x width=%u halfLines=%u coi=%u\n",
+                viCtrlDbg, (u32)data_, (int)(u32)prevColorDepth, (int)io.colorDepth,
+                (u32)io.dramAddress, (u32)io.width,
+                (u32)io.halfLinesPerField, (u32)io.coincidence);
+      viCtrlDbg++;
+    }
   }
 
   if(address == 1) {
     //VI_DRAM_ADDRESS
     io.dramAddress = data.bit(0,23);
+    static int viDramDbg = 0;
+    if(viDramDbg++ < 8)
+      fprintf(stderr, "[VI_DRAM_ADDR#%d] write=0x%06x colorDepth=%d\n",
+              viDramDbg-1, (u32)io.dramAddress, (int)io.colorDepth);
   }
 
   if(address == 2) {
     //VI_H_WIDTH
     io.width = data.bit(0,11);
+    static int viWidthDbg = 0;
+    if(viWidthDbg++ < 8)
+      fprintf(stderr, "[VI_H_WIDTH#%d] write=%u colorDepth=%d dramAddr=0x%06x\n",
+              viWidthDbg-1, (u32)io.width, (int)io.colorDepth, (u32)io.dramAddress);
   }
 
   if(address == 3) {

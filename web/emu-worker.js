@@ -56,9 +56,10 @@ async function initModule() {
       if (adapter) {
         const adapterLimits = adapter.limits;
         // The paraLLEl-RDP ubershader uses 13 storage buffers in group(1).
-        // If the adapter can't support that many, disable GPU acceleration
-        // and let the WASM fall back to the CPU scanout path.
-        const MIN_STORAGE_BUFS = 13;
+        // The paraLLEl-RDP ubershader uses 15 storage buffers (across all bind groups).
+        // Require at least 15 to avoid acquiring a device that will fail shader compilation.
+        const MIN_STORAGE_BUFS = 15;
+        console.info(`[emu-worker] adapter maxStorageBuffersPerShaderStage=${adapterLimits.maxStorageBuffersPerShaderStage} maxBufferSize=${adapterLimits.maxBufferSize}`);
         if (adapterLimits.maxStorageBuffersPerShaderStage < MIN_STORAGE_BUFS) {
           console.warn(
             `[emu-worker] GPU maxStorageBuffersPerShaderStage=${adapterLimits.maxStorageBuffersPerShaderStage}` +

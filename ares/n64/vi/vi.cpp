@@ -200,10 +200,25 @@ auto VI::refresh() -> void {
     return;
   }
   #elif defined(WEBGPU)
+  {
+    static int viGpuDbg = 0;
+    if(viGpuDbg < 8) {
+      fprintf(stderr, "[VI::refresh#%d] webgpu: enable=%d gpuOutputValid=%d colorDepth=%d dramAddr=0x%06x width=%u\n",
+              viGpuDbg, (int)webgpurdp.enable, (int)gpuOutputValid,
+              (int)io.colorDepth, (u32)io.dramAddress, (u32)io.width);
+      viGpuDbg++;
+    }
+  }
   if(webgpurdp.enable && gpuOutputValid) {
     const u8* rgba = nullptr;
     u32 width = 0, height = 0;
     webgpurdp.mapScanoutRead(rgba, width, height);
+    {
+      static int viMapDbg = 0;
+      if(viMapDbg++ < 8)
+        fprintf(stderr, "[VI::mapScanout#%d] rgba=%p width=%u height=%u\n",
+                viMapDbg-1, (const void*)rgba, width, height);
+    }
     if(rgba) {
       screen->setViewport(0, 0, width, height);
       for(u32 y : range(height)) {
@@ -224,7 +239,7 @@ auto VI::refresh() -> void {
   #endif
 
   static int viDbg = 0;
-  if(viDbg++ < 5)
+  if(viDbg++ < 8)
     fprintf(stderr, "[VI::refresh] sw path: colorDepth=%d dramAddr=0x%06x "
             "width=%d xscale=0x%x yscale=0x%x "
             "hstart=%d hend=%d vstart=%d vend=%d\n",

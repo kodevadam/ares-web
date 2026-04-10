@@ -450,54 +450,54 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     I.pl_maskedResolve  = createComputePipeline(I.device, I.sm_maskedResolve,  "main", nullptr);
     I.pl_extractVram    = createComputePipeline(I.device, I.sm_extractVram,    "main", nullptr);
 
-    // --- Create complex rendering pipelines inside an error scope ---
-    // Dawn always returns a non-null WGPUComputePipeline handle even for pipelines
-    // that fail validation (e.g. exceeding maxStorageBuffersPerShaderStage).
-    // We use an error scope to reliably detect failures: any validation error
-    // raised while the scope is open will be captured by the pop callback.
-    // emscripten_sleep(0) yields to the JS event loop (ASYNCIFY) so Dawn can
-    // process the error scope callback before we read the result.
-    struct ErrCtx { bool done; bool hadError; };
-    ErrCtx errCtx = { false, false };
+    // --- Create complex rendering pipelines, one error scope per pipeline ---
+    // We test each pipeline individually so we know WHICH one fails.
+    struct ErrCtx { bool done; bool hadError; const char* name; };
+    bool anyError = false;
 
-    wgpuDevicePushErrorScope(I.device, WGPUErrorFilter_Validation);
-
-    I.pl_ubershader  = createComputePipeline(I.device, I.sm_ubershader,  "main", nullptr);
-    I.pl_rasterizer  = createComputePipeline(I.device, I.sm_rasterizer,  "main", nullptr);
-    I.pl_spanSetup   = createComputePipeline(I.device, I.sm_spanSetup,   "main", nullptr);
-    I.pl_tileBinning = createComputePipeline(I.device, I.sm_tileBinning, "main", nullptr);
-    I.pl_depthBlend  = createComputePipeline(I.device, I.sm_depthBlend,  "main", nullptr);
-    I.pl_tmemUpdate  = createComputePipeline(I.device, I.sm_tmemUpdate,  "main", nullptr);
-
-    {
+    auto testPipeline = [&](WGPUComputePipeline& pl, WGPUShaderModule sm,
+                             const char* name) {
+        ErrCtx ctx = { false, false, name };
+        wgpuDevicePushErrorScope(I.device, WGPUErrorFilter_Validation);
+        pl = createComputePipeline(I.device, sm, "main", nullptr);
         WGPUPopErrorScopeCallbackInfo popInfo = WGPU_POP_ERROR_SCOPE_CALLBACK_INFO_INIT;
         popInfo.callback = [](WGPUPopErrorScopeStatus /*status*/, WGPUErrorType type,
                                WGPUStringView msg, void* ud, void* /*ud2*/) {
-            auto* ctx = static_cast<ErrCtx*>(ud);
+            auto* c = static_cast<ErrCtx*>(ud);
             if (type != WGPUErrorType_NoError) {
-                fprintf(stderr, "[WebGpuRdp] pipeline compile error (type=%d): %.*s\n",
-                    (int)type, (int)msg.length, msg.data);
-                ctx->hadError = true;
+                // Truncate long messages to avoid flooding the log
+                int len = (int)msg.length > 512 ? 512 : (int)msg.length;
+                fprintf(stderr, "[WebGpuRdp] %s compile FAIL (type=%d): %.*s\n",
+                    c->name, (int)type, len, msg.data);
+                c->hadError = true;
+            } else {
+                fprintf(stderr, "[WebGpuRdp] %s compile OK\n", c->name);
             }
-            ctx->done = true;
+            c->done = true;
         };
-        popInfo.userdata1 = &errCtx;
+        popInfo.userdata1 = &ctx;
         wgpuDevicePopErrorScope(I.device, popInfo);
-        // Yield to the JS event loop until the error scope callback fires.
-        while (!errCtx.done) emscripten_sleep(1);
-    }
+        while (!ctx.done) emscripten_sleep(1);
+        if (ctx.hadError) anyError = true;
+    };
 
-    // GPU rendering requires all three core passes to be valid.
-    // If the error scope detected any validation failure, fall back to software.
-    I.gpuRenderingActive = !errCtx.hadError;
+    testPipeline(I.pl_ubershader,  I.sm_ubershader,  "ubershader");
+    testPipeline(I.pl_rasterizer,  I.sm_rasterizer,  "rasterizer");
+    testPipeline(I.pl_spanSetup,   I.sm_spanSetup,   "span_setup");
+    testPipeline(I.pl_tileBinning, I.sm_tileBinning, "tile_binning");
+    testPipeline(I.pl_depthBlend,  I.sm_depthBlend,  "depth_blend");
+    testPipeline(I.pl_tmemUpdate,  I.sm_tmemUpdate,  "tmem_update");
+
+    // GPU rendering requires all core passes to be valid.
+    I.gpuRenderingActive = !anyError;
 
     if (I.gpuRenderingActive) {
         platform->status("WebGPU enabled: paraLLEl-RDP GPU dispatch active");
     } else {
         platform->status("WebGPU enabled: GPU pipeline compile failed — using software renderer");
     }
-    fprintf(stderr, "[WebGpuRdp] load done (gpuActive=%d device=%p errCtx.hadError=%d)\n",
-        (int)I.gpuRenderingActive, (void*)I.device, (int)errCtx.hadError);
+    fprintf(stderr, "[WebGpuRdp] load done (gpuActive=%d device=%p anyError=%d)\n",
+        (int)I.gpuRenderingActive, (void*)I.device, (int)anyError);
     return true;
 }
 

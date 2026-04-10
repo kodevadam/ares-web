@@ -40,8 +40,11 @@ auto CPU::main() -> void {
   static u64 s_totalIters = 0;
   u64 iters = 0;
   static constexpr u64 MAX_ITERS = 3000000ULL;
-  fprintf(stderr, "[cpu.main] enter pc=%08x vi.refreshed=%d vi.clock=%lld\n",
-    (unsigned)(ipu.pc & 0xffffffffu), (int)vi.refreshed, (long long)vi.clock);
+  fprintf(stderr, "[cpu.main] enter pc=%08x vi.refreshed=%d vi.clock=%lld vi.hlpf=%u vi.coi=%u vi.cd=%u vi.dram=0x%06x vi.w=%u\n",
+    (unsigned)(ipu.pc & 0xffffffffu), (int)vi.refreshed, (long long)vi.clock,
+    (unsigned)(u32)vi.io.halfLinesPerField, (unsigned)(u32)vi.io.coincidence,
+    (unsigned)(u32)vi.io.colorDepth, (unsigned)(u32)vi.io.dramAddress,
+    (unsigned)(u32)vi.io.width);
 #endif
   while(!vi.refreshed && GDB::server.reportPC(ipu.pc & 0xFFFFFFFF)) {
 #if defined(ARES_WEB)
