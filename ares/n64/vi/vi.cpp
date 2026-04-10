@@ -147,7 +147,27 @@ auto VI::main() -> void {
       ++io.vcounter;  // n9: wraps naturally at 512
       if(++inactiveCounter >= 200) {
         inactiveCounter = 0;
-        refreshed = true;
+        // If the display is configured (colorDepth set), trigger a frame
+        // refresh so the web build shows framebuffer content even before
+        // halfLinesPerField is programmed.  Without this, screen->frame()
+        // is never called in inactive mode, producing a permanent black screen.
+        if(active()) {
+          #if defined(VULKAN)
+          if (vulkan.enable) {
+            gpuOutputValid = vulkan.scanoutAsync(io.field);
+            vulkan.frame();
+          }
+          #elif defined(WEBGPU)
+          if (webgpurdp.enable) {
+            gpuOutputValid = webgpurdp.scanoutAsync(io.field);
+            webgpurdp.frame();
+          }
+          #endif
+          refreshed = true;
+          screen->frame();
+        } else {
+          refreshed = true;
+        }
       }
       // Coincidence interrupt check — mirrors the interlaced path above.
       // halfLinesPerField=0 means bit(0)=0 so we take the interlaced branch.
@@ -259,9 +279,9 @@ auto VI::refresh() -> void {
   screen->setViewport(0, 0, hscan_len, vscan_len);
 
   i32 dy0 = vi.io.vstart;
-  i32 dy1 = vi.io.vend;   if (dy1 < dy0) dy1 = vscan_stop;
+  i32 dy1 = vi.io.vend;   if (dy1 < dy0 || dy1 == 0) dy1 = vscan_stop;
   i32 dx0 = vi.io.hstart;
-  i32 dx1 = vi.io.hend;
+  i32 dx1 = vi.io.hend;   if (dx1 == 0) dx1 = (i32)hscan_stop;
 
   dy0 = max(vscan_start, dy0);
   dy1 = min(vscan_stop,  dy1);

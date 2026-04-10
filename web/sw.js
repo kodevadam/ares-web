@@ -19,7 +19,7 @@
 
 'use strict';
 
-const CACHE_VERSION = 'ares-v2';
+const CACHE_VERSION = 'ares-v3';
 
 // Files to pre-cache on install.
 const PRECACHE_URLS = [
