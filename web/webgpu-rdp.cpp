@@ -64,6 +64,8 @@ static const char* wgsl_clear_super_sampled_write_mask= "";
 static const char* wgsl_masked_rdram_resolve          = "";
 static const char* wgsl_extract_vram                  = "";
 static const char* wgsl_ubershader                    = "";
+static const char* wgsl_ubershader_rgba5551           = "";
+static const char* wgsl_ubershader_rgba8888           = "";
 static const char* wgsl_rasterizer                    = "";
 static const char* wgsl_span_setup                    = "";
 static const char* wgsl_tile_binning                  = "";
@@ -187,6 +189,8 @@ struct WebGpuRdp::Implementation {
     WGPUShaderModule sm_maskedResolve     = nullptr;
     WGPUShaderModule sm_extractVram       = nullptr;
     WGPUShaderModule sm_ubershader        = nullptr;
+    WGPUShaderModule sm_ubershader_rgba5551 = nullptr;
+    WGPUShaderModule sm_ubershader_rgba8888 = nullptr;
     WGPUShaderModule sm_rasterizer        = nullptr;
     WGPUShaderModule sm_spanSetup         = nullptr;
     WGPUShaderModule sm_tileBinning       = nullptr;
@@ -200,6 +204,8 @@ struct WebGpuRdp::Implementation {
     WGPUComputePipeline pl_maskedResolve  = nullptr;
     WGPUComputePipeline pl_extractVram    = nullptr;
     WGPUComputePipeline pl_ubershader     = nullptr;
+    WGPUComputePipeline pl_ubershader_rgba5551 = nullptr;
+    WGPUComputePipeline pl_ubershader_rgba8888 = nullptr;
     WGPUComputePipeline pl_rasterizer     = nullptr;
     WGPUComputePipeline pl_spanSetup      = nullptr;
     WGPUComputePipeline pl_tileBinning    = nullptr;
@@ -438,7 +444,9 @@ auto WebGpuRdp::load(Node::Object) -> bool {
 
     // Complex rendering shaders: compiled from embedded WGSL (Naga-transpiled).
     // Source is embedded at build time via web/generated/shader_sources.h.
-    I.sm_ubershader  = createShaderModule(I.device, wgsl_ubershader);
+    I.sm_ubershader         = createShaderModule(I.device, wgsl_ubershader);
+    I.sm_ubershader_rgba5551 = createShaderModule(I.device, wgsl_ubershader_rgba5551);
+    I.sm_ubershader_rgba8888 = createShaderModule(I.device, wgsl_ubershader_rgba8888);
     I.sm_rasterizer  = createShaderModule(I.device, wgsl_rasterizer);
     I.sm_spanSetup   = createShaderModule(I.device, wgsl_span_setup);
     I.sm_tileBinning = createShaderModule(I.device, wgsl_tile_binning);
@@ -484,8 +492,10 @@ auto WebGpuRdp::load(Node::Object) -> bool {
         if (ctx.hadError) anyError = true;
     };
 
-    testPipeline(I.pl_ubershader,  I.sm_ubershader,  "ubershader");
-    testPipeline(I.pl_rasterizer,  I.sm_rasterizer,  "rasterizer");
+    testPipeline(I.pl_ubershader,          I.sm_ubershader,          "ubershader");
+    testPipeline(I.pl_ubershader_rgba5551, I.sm_ubershader_rgba5551, "ubershader_rgba5551");
+    testPipeline(I.pl_ubershader_rgba8888, I.sm_ubershader_rgba8888, "ubershader_rgba8888");
+    testPipeline(I.pl_rasterizer,          I.sm_rasterizer,          "rasterizer");
     testPipeline(I.pl_spanSetup,   I.sm_spanSetup,   "span_setup");
     testPipeline(I.pl_tileBinning, I.sm_tileBinning, "tile_binning");
     testPipeline(I.pl_depthBlend,  I.sm_depthBlend,  "depth_blend");
@@ -563,6 +573,8 @@ auto WebGpuRdp::unload() -> void {
     releaseSM(I.sm_maskedResolve);
     releaseSM(I.sm_extractVram);
     releaseSM(I.sm_ubershader);
+    releaseSM(I.sm_ubershader_rgba5551);
+    releaseSM(I.sm_ubershader_rgba8888);
     releaseSM(I.sm_rasterizer);
     releaseSM(I.sm_spanSetup);
     releaseSM(I.sm_tileBinning);
@@ -577,6 +589,8 @@ auto WebGpuRdp::unload() -> void {
     releasePL(I.pl_maskedResolve);
     releasePL(I.pl_extractVram);
     releasePL(I.pl_ubershader);
+    releasePL(I.pl_ubershader_rgba5551);
+    releasePL(I.pl_ubershader_rgba8888);
     releasePL(I.pl_rasterizer);
     releasePL(I.pl_spanSetup);
     releasePL(I.pl_tileBinning);
@@ -903,21 +917,38 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
     }
 
     // GlobalFBInfo: dx_shift, dx_mask, fb_size, base_primitive_index
+    // Values match parallel-rdp rdp_renderer.cpp submit_render_pass() switch(fb.fmt).
     {
-        // dx_shift: log2 of bytes-per-pixel (0=8bpp, 1=16bpp, 2=32bpp)
-        // For N64: fbFmt 2 = RGBA5551 (16bpp, shift=1), fbFmt 0 = RGBA8888 (32bpp, shift=2)
-        u32 dxShift = (I.fbFmt == 2) ? 1u : 2u;
-        u32 dxMask  = (1u << dxShift) - 1u;
-        u32 fbSize  = fbW * fbH * (1u << dxShift);
-        u32 globalFBInfo[4] = { dxShift, dxMask, fbSize, 0u };
+        u32 dxShift, dxMask, fbSizeEnum;
+        switch (I.fbFmt) {
+        case 0:  // I4: byte-addressed
+            dxShift = 0; dxMask = 0u;          fbSizeEnum = 0; break;
+        case 1:  // I8: byte-addressed
+            dxShift = 3; dxMask = ~7u;         fbSizeEnum = 1; break;
+        case 2:  // RGBA5551/IA88: half-word pixel index
+            dxShift = 2; dxMask = ~3u;         fbSizeEnum = 2; break;
+        case 3:  // IA88 variant: half-word pixel index
+            dxShift = 2; dxMask = ~3u;         fbSizeEnum = 2; break;
+        default: // RGBA8888 (fbFmt=3 from SET_COLOR_IMAGE bits[21:19]): word pixel index
+            dxShift = 1; dxMask = ~1u;         fbSizeEnum = 4; break;
+        }
+        u32 globalFBInfo[4] = { dxShift, dxMask, fbSizeEnum, 0u };
         wgpuQueueWriteBuffer(I.queue, I.globalFBInfoBuf, 0, globalFBInfo, sizeof(globalFBInfo));
     }
 
     // GlobalState: addr_index, depth_addr_index, fb_width, fb_height, group_mask
+    // addr_index must be in pixel units for the current format:
+    //   I4/I8: byte address (>> 0), RGBA5551/IA88: half-word (>> 1), RGBA8888: word (>> 2)
+    // depth is always half-word indexed (>> 1).
     {
-        // addr_index / depth_addr_index: RDRAM byte address >> 2 (u32 word index)
-        u32 addrIndex      = I.fbAddr      >> 2;
-        u32 depthAddrIndex = I.fbDepthAddr >> 2;
+        u32 addrShift;
+        switch (I.fbFmt) {
+        case 0: case 1: addrShift = 0; break;   // I4/I8: byte address
+        case 2: case 3: addrShift = 1; break;   // RGBA5551/IA88: half-word pixel
+        default:        addrShift = 2; break;   // RGBA8888: word pixel
+        }
+        u32 addrIndex      = I.fbAddr      >> addrShift;
+        u32 depthAddrIndex = I.fbDepthAddr >> 1;  // depth always half-word indexed
         u32 groupMask      = 0xFFFFFFFFu;  // all groups active
         u32 globalState[5] = { addrIndex, depthAddrIndex, fbW, fbH, groupMask };
         wgpuQueueWriteBuffer(I.queue, I.globalStateBuf, 0, globalState, sizeof(globalState));
@@ -1022,15 +1053,32 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         wgpuComputePassEncoderRelease(pass);
     }
 
-    // Pass 3: ubershader
+    // Pass 3: ubershader — select pipeline variant for the current framebuffer format.
     // Rasterises and shades each tile, writing pixels into rdramBuf.
     // In WebGPU, storage buffer writes from prior passes in the same submission
     // are visible to subsequent dispatches — no explicit barrier needed.
     {
+        // Pick the format-specific pipeline.  The ubershader WGSL is specialised for
+        // each format at SPIRV→WGSL transpilation time (analogous to Vulkan spec consts).
+        WGPUComputePipeline uberPipeline;
+        switch (I.fbFmt) {
+        case 2: case 3:  // RGBA5551 / IA88 (16bpp)
+            uberPipeline = I.pl_ubershader_rgba5551 ? I.pl_ubershader_rgba5551 : I.pl_ubershader;
+            break;
+        default:  // RGBA8888 (32bpp) or I4/I8
+            // Use RGBA8888 variant for 32bpp; fall back to default (I4) for others.
+            if (I.fbFmt == 0 || I.fbFmt == 1) {
+                uberPipeline = I.pl_ubershader;  // I4/I8 (default)
+            } else {
+                uberPipeline = I.pl_ubershader_rgba8888 ? I.pl_ubershader_rgba8888 : I.pl_ubershader;
+            }
+            break;
+        }
+
         WGPUComputePassDescriptor passDesc = {};
         passDesc.label = {"ubershader", WGPU_STRLEN};
         WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &passDesc);
-        wgpuComputePassEncoderSetPipeline(pass, I.pl_ubershader);
+        wgpuComputePassEncoderSetPipeline(pass, uberPipeline);
         wgpuComputePassEncoderSetBindGroup(pass, 0, I.bg_uber_g0, 0, nullptr);
         wgpuComputePassEncoderSetBindGroup(pass, 1, I.bg_uber_g1, 0, nullptr);
         wgpuComputePassEncoderSetBindGroup(pass, 2, I.bg_uber_g2, 0, nullptr);

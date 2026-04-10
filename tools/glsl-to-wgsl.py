@@ -86,9 +86,21 @@ SPEC_CONST_DEFAULTS = {
         4: ("int", "0"), 5: ("int", "0"), 6: ("int", "1"), 7: ("int", "0"),
     },
     "ubershader": {
-        # 0=RDRAM_SIZE, 1=FB_FMT(0=RGBA8888), 2=FB_COLOR_DEPTH_ALIAS, 3/%4=unknown,
+        # 0=RDRAM_SIZE, 1=FB_FMT(0=I4 default), 2=FB_COLOR_DEPTH_ALIAS, 3/4=local_size_x/y,
         # 5=MAX_PRIMITIVES, 6=MAX_WIDTH(→MAX_TILES_X=128), 7=RDRAM_INCOHERENT_SCALING
         0: ("uint", str(8*1024*1024)), 1: ("int", "0"), 2: ("int", "1"),
+        3: ("int", "8"), 4: ("int", "8"), 5: ("int", "256"), 6: ("int", "1024"), 7: ("int", "0"),
+    },
+    # RGBA5551 (16bpp) variant — used by most N64 games
+    "ubershader_rgba5551": {
+        # Same as ubershader but with FB_FMT=2 (RGBA5551), FB_COLOR_DEPTH_ALIAS=0
+        0: ("uint", str(8*1024*1024)), 1: ("int", "2"), 2: ("int", "0"),
+        3: ("int", "8"), 4: ("int", "8"), 5: ("int", "256"), 6: ("int", "1024"), 7: ("int", "0"),
+    },
+    # RGBA8888 (32bpp) variant — used by some N64 games
+    "ubershader_rgba8888": {
+        # Same as ubershader but with FB_FMT=4 (RGBA8888), FB_COLOR_DEPTH_ALIAS=0
+        0: ("uint", str(8*1024*1024)), 1: ("int", "4"), 2: ("int", "0"),
         3: ("int", "8"), 4: ("int", "8"), 5: ("int", "256"), 6: ("int", "1024"), 7: ("int", "0"),
     },
 }

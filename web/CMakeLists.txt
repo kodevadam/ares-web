@@ -25,6 +25,8 @@ set(SHADER_FILES
   masked_rdram_resolve
   extract_vram
   ubershader
+  ubershader_rgba5551
+  ubershader_rgba8888
   rasterizer
   span_setup
   tile_binning
