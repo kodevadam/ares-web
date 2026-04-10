@@ -58,6 +58,9 @@ public:
     // (i.e. after each SyncFull flush).
     void reset();
 
+    // Diagnostic accessor for the current scissor yhi value.
+    int scissorYhi() const { return scissor_state.yhi; }
+
     // ---- Stream data exposed for wgpuQueueWriteBuffer upload ----
     // triangle_setup and attribute_setup are per-primitive arrays (size = numPrimitives).
     // span_info_jobs drives the span_setup workgroup dispatch count.

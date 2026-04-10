@@ -960,11 +960,29 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         rebuildBindGroups(I);
     }
 
-    // Log periodically when GPU rendering dispatches actual primitives.
+    // Diagnostic: log every flush for the first 300 calls, then every 60.
+    // Show fbFmt, pipeline variant availability, and zero-prim/zero-span reasons.
     static u32 flushDbgCount = 0;
-    if (flushDbgCount < 4 || (numPrims > 0 && flushDbgCount % 60 == 0)) {
-        fprintf(stderr, "[flushGpu#%u] numPrims=%u spanJobs=%u fbW=%u fbH=%u fbAddr=0x%x\n",
-            flushDbgCount, numPrims, numSpanJobs, fbW, fbH, I.fbAddr);
+    {
+        bool shouldLog = (flushDbgCount < 300) || (flushDbgCount % 60 == 0);
+        if (shouldLog) {
+            // Determine which ubershader variant will be selected.
+            const char* pipelineVariant = "default";
+            if (I.fbFmt == 2 || I.fbFmt == 3) {
+                pipelineVariant = I.pl_ubershader_rgba5551 ? "rgba5551" : "rgba5551_MISSING->default";
+            } else if (I.fbFmt >= 4) {
+                pipelineVariant = I.pl_ubershader_rgba8888 ? "rgba8888" : "rgba8888_MISSING->default";
+            }
+            const char* skipReason = "";
+            if (numPrims == 0)    skipReason = " SKIP:numPrims=0";
+            else if (numSpanJobs == 0) skipReason = " SKIP:numSpanJobs=0";
+            fprintf(stderr,
+                "[flushGpu#%u] numPrims=%u spanJobs=%u fbFmt=%u fbW=%u fbH=%u "
+                "fbAddr=0x%x scissorYhi=%u pipeline=%s%s\n",
+                flushDbgCount, numPrims, numSpanJobs, I.fbFmt, fbW, fbH,
+                I.fbAddr, (unsigned)I.parser.scissorYhi(),
+                pipelineVariant, skipReason);
+        }
     }
     flushDbgCount++;
 
