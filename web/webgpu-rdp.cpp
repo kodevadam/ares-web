@@ -1214,13 +1214,14 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
 
     // Periodic diagnostic: every 60 frames log what the framebuffer looks like.
     if (I.frameCount < 4 || I.frameCount % 60 == 0) {
-        // Sample two 32-bit words at the framebuffer origin to check for non-zero content.
+        // Sample two words at origin. For GPU path, read LE u32 (ares layout).
         u32 s0 = 0, s1 = 0;
         if (src && origin + 7 < RDRAM_SIZE) {
-            s0 = (u32(src[origin])   << 24) | (u32(src[origin+1]) << 16) |
-                 (u32(src[origin+2]) <<  8) |  u32(src[origin+3]);
-            s1 = (u32(src[origin+4]) << 24) | (u32(src[origin+5]) << 16) |
-                 (u32(src[origin+6]) <<  8) |  u32(src[origin+7]);
+            // LE u32 read (ares/GPU byte order)
+            s0 = u32(src[origin])   | (u32(src[origin+1]) << 8) |
+                 (u32(src[origin+2]) << 16) | (u32(src[origin+3]) << 24);
+            s1 = u32(src[origin+4]) | (u32(src[origin+5]) << 8) |
+                 (u32(src[origin+6]) << 16) | (u32(src[origin+7]) << 24);
         } else if (origin + 7 < RDRAM_SIZE) {
             s0 = rdram.ram.read<Word>(origin,     RBusDevice::VI_DMA);
             s1 = rdram.ram.read<Word>(origin + 4, RBusDevice::VI_DMA);
@@ -1231,15 +1232,19 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
     }
 
     if (colorDepth == 3) {
-        // RGBA8888 (32 bpp) — one 32-bit word per pixel, big-endian.
+        // RGBA8888 (32 bpp).
+        // ares stores words little-endian (Word write has no XOR): rdramBuf[addr+0]=LSB, [addr+3]=MSB.
+        // The GPU ubershader also writes bytes with ^3 XOR matching ares layout.
+        // read<Word>(addr) returns the native u32 = AABBCCDD for N64 big-endian pixel 0xAABBCCDD.
         for (u32 y = 0; y < dispHeight; y++) {
             for (u32 x = 0; x < scanWidth; x++) {
                 u32 addr = origin + (y * scanWidth + x) * 4;
                 if (addr + 3 >= RDRAM_SIZE) { dst[0]=dst[1]=dst[2]=dst[3]=0; dst+=4; continue; }
                 u32 word;
                 if (src) {
-                    word = (u32(src[addr])   << 24) | (u32(src[addr+1]) << 16) |
-                           (u32(src[addr+2]) <<  8) |  u32(src[addr+3]);
+                    // rdramBuf stores u32 in little-endian: [addr]=LSB, [addr+3]=MSB.
+                    word = u32(src[addr]) | (u32(src[addr+1]) << 8) |
+                           (u32(src[addr+2]) << 16) | (u32(src[addr+3]) << 24);
                 } else {
                     word = rdram.ram.read<Word>(addr, RBusDevice::VI_DMA);
                 }
@@ -1251,19 +1256,26 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
             }
         }
     } else if (colorDepth == 2) {
-        // RGBA5551 (16 bpp) — two pixels per 32-bit word, big-endian.
+        // RGBA5551 (16 bpp).
+        // ares stores half-words with XOR-2 swap: Half at byte addr A is at data[A^2].
+        // The GPU ubershader writes with the same ^3 byte-swap (byte by byte), so the
+        // half-word at N64 addr A ends up at rdramBuf[A^2] in little-endian order.
+        // read<Half>(A) = *(u16*)&data[A^2] = correct u16 (little-endian on host).
         for (u32 y = 0; y < dispHeight; y++) {
             for (u32 x = 0; x < scanWidth; x++) {
                 u32 addr16 = origin / 2 + y * scanWidth + x;
-                u32 wordAddr = (addr16 & ~1u) * 2;
-                if (wordAddr + 3 >= RDRAM_SIZE) { dst[0]=dst[1]=dst[2]=dst[3]=0; dst+=4; continue; }
+                u32 byteAddr = addr16 * 2;  // N64 byte address of this half-word
+                // swapAddr = byteAddr ^ 2 (XOR-2 is even → +2); need swapAddr+1 in bounds.
+                if (byteAddr + 3 >= RDRAM_SIZE) { dst[0]=dst[1]=dst[2]=dst[3]=0; dst+=4; continue; }
                 u16 word16;
                 if (src) {
-                    // GPU readback buffer is a byte-array copy of RDRAM (big-endian N64).
-                    u32 byteAddr = addr16 * 2;
-                    word16 = u16((u32(src[byteAddr]) << 8) | src[byteAddr + 1]);
+                    // GPU buffer has ares layout: half at byteAddr stored at byteAddr^2.
+                    // Read as little-endian u16.
+                    u32 swapAddr = byteAddr ^ 2;
+                    word16 = u16(u32(src[swapAddr]) | (u32(src[swapAddr + 1]) << 8));
                 } else {
-                    word16 = rdram.ram.read<Half>(addr16 ^ 1, RBusDevice::VI_DMA);
+                    // read<Half>(byteAddr) = *(u16*)&data[byteAddr^2] = correct little-endian u16.
+                    word16 = rdram.ram.read<Half>(byteAddr, RBusDevice::VI_DMA);
                 }
                 dst[0] = (u8)(((word16 >> 11) & 0x1F) << 3);
                 dst[1] = (u8)(((word16 >>  6) & 0x1F) << 3);
