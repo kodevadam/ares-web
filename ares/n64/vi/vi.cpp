@@ -77,26 +77,42 @@ auto VI::unload() -> void {
 
 auto VI::main() -> void {
   while(Thread::clock < 0) {
-    if(active()) {
+    // On real N64 hardware the VI timing circuit (halfline counter,
+    // coincidence interrupt) runs independently of whether video output
+    // is enabled (colorDepth != 0). Many games write VI_V_TOTAL and
+    // VI_V_INTR first, then wait in an idle loop for the first VI
+    // interrupt, and only set colorDepth inside the interrupt handler.
+    // So: if halfLinesPerField has been programmed, always run real VI
+    // timing and fire coincidence interrupts regardless of colorDepth.
+    if(io.halfLinesPerField != 0) {
       ++io.vcounter;
       int halfline = io.vcounter << 1 | io.field;
       if(halfline >= io.halfLinesPerField+1) {
         io.vcounter = 0;
         io.field += !io.halfLinesPerField.bit(0);
         if(++io.leapCounter == 5) io.leapCounter = 0;
-        #if defined(VULKAN)
-        if (vulkan.enable) {
-          gpuOutputValid = vulkan.scanoutAsync(io.field);
-          vulkan.frame();
+        if(active()) {
+          #if defined(VULKAN)
+          if (vulkan.enable) {
+            gpuOutputValid = vulkan.scanoutAsync(io.field);
+            vulkan.frame();
+          }
+          #elif defined(WEBGPU)
+          if (webgpurdp.enable) {
+            gpuOutputValid = webgpurdp.scanoutAsync(io.field);
+            webgpurdp.frame();
+          }
+          #endif
+          refreshed = true;
+          screen->frame();
+        } else {
+          // Inactive display (colorDepth==0): keep scheduler moving at
+          // a moderate rate without hammering screen->frame().
+          if(++inactiveCounter >= 5) {
+            inactiveCounter = 0;
+            refreshed = true;
+          }
         }
-        #elif defined(WEBGPU)
-        if (webgpurdp.enable) {
-          gpuOutputValid = webgpurdp.scanoutAsync(io.field);
-          webgpurdp.frame();
-        }
-        #endif
-        refreshed = true;
-        screen->frame();
       }
 
       if(io.halfLinesPerField.bit(0)) { // progressive
@@ -121,12 +137,11 @@ auto VI::main() -> void {
 
       u32 lineDuration = io.quarterLineDuration+1;
       if(io.vcounter == 1)
-        lineDuration = io.hsyncLeap[io.leapPattern.bit(io.leapCounter)];      
+        lineDuration = io.hsyncLeap[io.leapPattern.bit(io.leapCounter)];
       step(lineDuration);
     } else {
-      // Arbitrarily call screen->frame() every once in a while to keep the UI responsive.
-      // We do that every 200 simulated lines of 0x800 quarter-clocks. This is just arbitrary,
-      // the real VI is not clocking at all when inactive.
+      // halfLinesPerField not yet programmed: VI timing hardware is idle.
+      // Just keep time moving so other components can advance.
       io.vcounter = 0;
       if(++inactiveCounter >= 200) {
         inactiveCounter = 0;

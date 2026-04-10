@@ -116,6 +116,10 @@ auto VI::writeWord(u32 address, u32 data_, Thread& thread) -> void {
     io.reserved.bit(7)     = data.bit( 7);
     io.antialias           = data.bit( 8, 9);
     io.reserved.bit(10,15) = data.bit(10,15);
+    static int viCtrlDbg = 0;
+    if(viCtrlDbg++ < 8)
+      fprintf(stderr, "[VI_CONTROL] write=0x%08x colorDepth=%d halfLines=%u coincidence=%u\n",
+              (u32)data_, (int)io.colorDepth, (u32)io.halfLinesPerField, (u32)io.coincidence);
   }
 
   if(address == 1) {
@@ -149,6 +153,9 @@ auto VI::writeWord(u32 address, u32 data_, Thread& thread) -> void {
   if(address == 6) {
     //VI_V_TOTAL
     io.halfLinesPerField = data.bit(0,9);
+    static int viVtotalDbg = 0;
+    if(viVtotalDbg++ < 4)
+      fprintf(stderr, "[VI_V_TOTAL] halfLinesPerField=%u\n", (u32)io.halfLinesPerField);
   }
 
   if(address == 7) {
