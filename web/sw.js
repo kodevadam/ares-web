@@ -19,7 +19,7 @@
 
 'use strict';
 
-const CACHE_VERSION = 'ares-v1';
+const CACHE_VERSION = 'ares-v2';
 
 // Files to pre-cache on install.
 const PRECACHE_URLS = [
@@ -100,7 +100,10 @@ async function handleFetch(request) {
   const cached = await caches.match(request);
   const networkFetch = fetch(request).then((response) => {
     if (response.ok) {
-      caches.open(CACHE_VERSION).then((c) => c.put(request, response.clone()));
+      // Clone synchronously before any async work; addCOIHeaders below may
+      // consume response.body, which would make a deferred clone() throw.
+      const clone = response.clone();
+      caches.open(CACHE_VERSION).then((c) => c.put(request, clone));
     }
     return addCOIHeaders(response, isNavigation);
   }).catch(() => null);
