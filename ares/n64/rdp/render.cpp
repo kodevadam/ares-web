@@ -675,6 +675,70 @@ auto RDP::setTile() -> void {
 
 //0x36
 auto RDP::fillRectangle() -> void {
+  // Only fill mode (cycleType == 0) is implemented here.
+  // Copy / 1-cycle / 2-cycle modes require per-pixel blending.
+  if(other.cycleType != 0) return;
+
+  u32 colorAddr  = set.color.dramAddress;
+  u32 colorSize  = set.color.size;   // 2 = 16 bpp, 3 = 32 bpp
+  u32 colorPitch = set.color.width;  // framebuffer width in pixels
+
+  if(!colorAddr || !colorPitch) return;
+  if(colorSize < 2) return;  // 4 bpp / 8 bpp not implemented
+
+  // Rectangle bounds: 10.2 fixed-point → integer pixels (inclusive both ends).
+  // ares convention: .hi field holds XH/YH (upper-left), .lo holds XL/YL (lower-right).
+  i32 x0 = (i32)((u32)fillRectangle_.x.hi >> 2);
+  i32 y0 = (i32)((u32)fillRectangle_.y.hi >> 2);
+  i32 x1 = (i32)((u32)fillRectangle_.x.lo >> 2);
+  i32 y1 = (i32)((u32)fillRectangle_.y.lo >> 2);
+
+  // Scissor: XH/YH = upper-left (inclusive), XL/YL = lower-right (exclusive).
+  i32 sx0 = (i32)((u32)scissor.x.hi >> 2);
+  i32 sy0 = (i32)((u32)scissor.y.hi >> 2);
+  i32 sx1 = (i32)((u32)scissor.x.lo >> 2) - 1;  // convert to inclusive
+  i32 sy1 = (i32)((u32)scissor.y.lo >> 2) - 1;
+
+  // Ignore scissor if it was never set (all-zero → exclusive right/bottom = 0 → sx1=-1).
+  if(sx1 >= 0) x0 = x0 > sx0 ? x0 : sx0, x1 = x1 < sx1 ? x1 : sx1;
+  if(sy1 >= 0) y0 = y0 > sy0 ? y0 : sy0, y1 = y1 < sy1 ? y1 : sy1;
+
+  if(x0 > x1 || y0 > y1) return;
+
+  static int fillDbg = 0;
+  if(fillDbg++ < 8)
+    fprintf(stderr, "[RDP::fillRect] size=%u pitch=%u addr=0x%06x "
+            "x0=%d y0=%d x1=%d y1=%d fill=0x%08x\n",
+            colorSize, colorPitch, colorAddr, (int)x0, (int)y0, (int)x1, (int)y1,
+            (u32)set.fill.color);
+
+  u32 fillColor = set.fill.color;
+  constexpr u32 RDRAM_SIZE_BYTES = 8u * 1024u * 1024u;
+
+  if(colorSize == 2) {
+    // 16 bpp RGBA5551: fill.color packs two 16-bit pixels.
+    // Which half is used depends on the 16-bit-word address of each pixel.
+    u32 halfBase = colorAddr >> 1;  // byte address → 16-bit word address
+    for(i32 y = y0; y <= y1; y++) {
+      for(i32 x = x0; x <= x1; x++) {
+        u32 halfAddr = halfBase + (u32)y * colorPitch + (u32)x;
+        u16 pixel    = (halfAddr & 1u) ? (u16)(fillColor & 0xFFFF)
+                                       : (u16)(fillColor >> 16);
+        u32 byteAddr = halfAddr * 2u;
+        if(byteAddr + 2u <= RDRAM_SIZE_BYTES)
+          rdram.ram.write<Half>(byteAddr, pixel, RBusDevice::DP_DRAW);
+      }
+    }
+  } else {
+    // 32 bpp: each pixel is the full 32-bit fill color.
+    for(i32 y = y0; y <= y1; y++) {
+      for(i32 x = x0; x <= x1; x++) {
+        u32 addr = colorAddr + ((u32)y * colorPitch + (u32)x) * 4u;
+        if(addr + 4u <= RDRAM_SIZE_BYTES)
+          rdram.ram.write<Word>(addr, fillColor, RBusDevice::DP_DRAW);
+      }
+    }
+  }
 }
 
 //0x37

@@ -191,6 +191,15 @@ auto VI::refresh() -> void {
   }
   #endif
 
+  static int viDbg = 0;
+  if(viDbg++ < 5)
+    fprintf(stderr, "[VI::refresh] sw path: colorDepth=%d dramAddr=0x%06x "
+            "width=%d xscale=0x%x yscale=0x%x "
+            "hstart=%d hend=%d vstart=%d vend=%d\n",
+            (int)io.colorDepth, (u32)io.dramAddress, (int)io.width,
+            (u32)io.xscale, (u32)io.yscale,
+            (int)io.hstart, (int)io.hend, (int)io.vstart, (int)io.vend);
+
   if(io.serrate == 0) screen->setProgressive(0);
   if(io.serrate == 1) screen->setInterlace(!io.field);
 
