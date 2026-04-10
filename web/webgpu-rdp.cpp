@@ -302,6 +302,9 @@ struct WebGpuRdp::Implementation {
     // Per-frame dirty flag: RDRAM was written by CPU since last upload.
     bool rdramDirty = true;
 
+    // Frame counter for periodic diagnostic logging.
+    u32 frameCount = 0;
+
     // CPU-side RDP command parser (fills stream buffers for GPU dispatch).
     Web::RdpCpuParser parser;
 };
@@ -593,6 +596,7 @@ auto WebGpuRdp::frame() -> void {
     implementation->queueSize   = 0;
     implementation->queueOffset = 0;
     implementation->rdramDirty  = true;
+    implementation->frameCount++;
 }
 
 // ---------------------------------------------------------------------------
@@ -925,6 +929,14 @@ static void flushGpuCommands(WebGpuRdp::Implementation& I) {
         rebuildBindGroups(I);
     }
 
+    // Log periodically when GPU rendering dispatches actual primitives.
+    static u32 flushDbgCount = 0;
+    if (flushDbgCount < 4 || (numPrims > 0 && flushDbgCount % 60 == 0)) {
+        fprintf(stderr, "[flushGpu#%u] numPrims=%u spanJobs=%u fbW=%u fbH=%u fbAddr=0x%x\n",
+            flushDbgCount, numPrims, numSpanJobs, fbW, fbH, I.fbAddr);
+    }
+    flushDbgCount++;
+
     // Skip dispatch if no primitives (nothing to render).
     if (numPrims == 0 || numSpanJobs == 0) return;
 
@@ -1111,6 +1123,13 @@ auto WebGpuRdp::scanoutAsync(bool /*field*/) -> bool {
     auto& I = *implementation;
     if (I.viOrigin == 0 || I.viWidth == 0) return false;
 
+    // Periodic diagnostic: log GPU/SW path every 60 frames so it appears
+    // in any log window regardless of when the user captures output.
+    if (I.frameCount < 4 || I.frameCount % 60 == 0) {
+        fprintf(stderr, "[scanout#%u] gpuActive=%d viOrigin=0x%x viW=%u readbackReady=%d\n",
+            I.frameCount, (int)I.gpuRenderingActive, I.viOrigin, I.viWidth, (int)I.readbackReady);
+    }
+
     if (!I.gpuRenderingActive) {
         // Software path: RDRAM has already been written by the SW RDP.
         return true;
@@ -1192,6 +1211,24 @@ auto WebGpuRdp::mapScanoutRead(const u8*& rgba, u32& width, u32& height) -> void
     // When GPU rendering has produced a readback, read from the mapped GPU
     // buffer.  Otherwise fall back to CPU-side RDRAM.
     const uint8_t* src = (I.readbackReady && I.readbackPtr) ? I.readbackPtr : nullptr;
+
+    // Periodic diagnostic: every 60 frames log what the framebuffer looks like.
+    if (I.frameCount < 4 || I.frameCount % 60 == 0) {
+        // Sample two 32-bit words at the framebuffer origin to check for non-zero content.
+        u32 s0 = 0, s1 = 0;
+        if (src && origin + 7 < RDRAM_SIZE) {
+            s0 = (u32(src[origin])   << 24) | (u32(src[origin+1]) << 16) |
+                 (u32(src[origin+2]) <<  8) |  u32(src[origin+3]);
+            s1 = (u32(src[origin+4]) << 24) | (u32(src[origin+5]) << 16) |
+                 (u32(src[origin+6]) <<  8) |  u32(src[origin+7]);
+        } else if (origin + 7 < RDRAM_SIZE) {
+            s0 = rdram.ram.read<Word>(origin,     RBusDevice::VI_DMA);
+            s1 = rdram.ram.read<Word>(origin + 4, RBusDevice::VI_DMA);
+        }
+        fprintf(stderr, "[mapScanout#%u] gpuActive=%d src=%p origin=0x%x w=%u h=%u fb[0]=0x%08x fb[1]=0x%08x\n",
+            I.frameCount, (int)I.gpuRenderingActive, (const void*)src,
+            origin, scanWidth, dispHeight, s0, s1);
+    }
 
     if (colorDepth == 3) {
         // RGBA8888 (32 bpp) — one 32-bit word per pixel, big-endian.
