@@ -502,15 +502,16 @@ auto WebGpuRdp::load(Node::Object) -> bool {
     testPipeline(I.pl_tmemUpdate,  I.sm_tmemUpdate,  "tmem_update");
 
     // GPU rendering requires all core passes to be valid.
-    I.gpuRenderingActive = !anyError;
+    // TODO: The WGSL ubershader currently produces zero-pixel output due to a
+    // shader logic bug that needs further investigation.  Force SW fallback so
+    // the software RDP writes to rdram.ram and mapScanoutRead() reads it back.
+    // When the GPU path is confirmed working, restore: I.gpuRenderingActive = !anyError;
+    (void)anyError;
+    I.gpuRenderingActive = false;
 
-    if (I.gpuRenderingActive) {
-        platform->status("WebGPU enabled: paraLLEl-RDP GPU dispatch active");
-    } else {
-        platform->status("WebGPU enabled: GPU pipeline compile failed — using software renderer");
-    }
-    fprintf(stderr, "[WebGpuRdp] load done (gpuActive=%d device=%p anyError=%d)\n",
-        (int)I.gpuRenderingActive, (void*)I.device, (int)anyError);
+    platform->status("WebGPU device present: using software RDP renderer (GPU path disabled)");
+    fprintf(stderr, "[WebGpuRdp] load done (gpuActive=%d device=%p shaderCompile=%s)\n",
+        (int)I.gpuRenderingActive, (void*)I.device, anyError ? "FAIL" : "OK");
     return true;
 }
 

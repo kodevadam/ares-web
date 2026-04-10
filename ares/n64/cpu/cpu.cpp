@@ -38,54 +38,34 @@ auto CPU::main() -> void {
   u64 prevPc = ~ipu.pc;
   u64 pprevPc = ~ipu.pc;
   static u64 s_totalIters = 0;
+  static u32 s_frameCount = 0;
   u64 iters = 0;
   static constexpr u64 MAX_ITERS = 3000000ULL;
-  fprintf(stderr, "[cpu.main] enter pc=%08x vi.refreshed=%d vi.clock=%lld vi.hlpf=%u vi.coi=%u vi.cd=%u vi.dram=0x%06x vi.w=%u\n",
-    (unsigned)(ipu.pc & 0xffffffffu), (int)vi.refreshed, (long long)vi.clock,
-    (unsigned)(u32)vi.io.halfLinesPerField, (unsigned)(u32)vi.io.coincidence,
-    (unsigned)(u32)vi.io.colorDepth, (unsigned)(u32)vi.io.dramAddress,
-    (unsigned)(u32)vi.io.width);
+  // Log only the first 5 frames and then every 300 to reduce spam.
+  bool shouldLog = (s_frameCount < 5 || s_frameCount % 300 == 0);
+  if (shouldLog) {
+    fprintf(stderr, "[cpu.main#%u] enter pc=%08x vi.hlpf=%u vi.cd=%u vi.dram=0x%06x\n",
+      s_frameCount,
+      (unsigned)(ipu.pc & 0xffffffffu),
+      (unsigned)(u32)vi.io.halfLinesPerField,
+      (unsigned)(u32)vi.io.colorDepth, (unsigned)(u32)vi.io.dramAddress);
+  }
 #endif
   while(!vi.refreshed && GDB::server.reportPC(ipu.pc & 0xFFFFFFFF)) {
 #if defined(ARES_WEB)
     ++iters;
-    if(iters == 1) {
-      fprintf(stderr, "[cpu.main] first instruction pc=%08x\n",
-        (unsigned)(ipu.pc & 0xffffffffu));
-    }
     if(iters > MAX_ITERS) {
-      fprintf(stderr, "[cpu.main] cap hit: total=%llu vi.clock=%lld vi.inactive=%u vi.hlpf=%u vi.coi=%u pc=%08x\n",
+      fprintf(stderr, "[cpu.main#%u] cap hit: total=%llu vi.hlpf=%u pc=%08x\n",
+        s_frameCount,
         (unsigned long long)(s_totalIters + iters),
-        (long long)vi.clock,
-        (unsigned)vi.inactiveCounter,
         (unsigned)(u32)vi.io.halfLinesPerField,
-        (unsigned)(u32)vi.io.coincidence,
         (unsigned)(ipu.pc & 0xffffffffu));
       break;
     }
-    if(iters % 100000ULL == 0) {
-      fprintf(stderr, "[cpu.main] iter %llu vi.clock=%lld vi.inactive=%u vi.hlpf=%u vi.coi=%u pc=%08x\n",
-        (unsigned long long)(s_totalIters + iters),
-        (long long)vi.clock,
-        (unsigned)vi.inactiveCounter,
-        (unsigned)(u32)vi.io.halfLinesPerField,
-        (unsigned)(u32)vi.io.coincidence,
-        (unsigned)(ipu.pc & 0xffffffffu));
-    }
 #endif
     instruction();
-#if defined(ARES_WEB)
-    if(iters == 1) {
-      fprintf(stderr, "[cpu.main] after first instruction pc=%08x Thread::clock=%lld\n",
-        (unsigned)(ipu.pc & 0xffffffffu), (long long)Thread::clock);
-    }
-#endif
     synchronize();
 #if defined(ARES_WEB)
-    if(iters == 1) {
-      fprintf(stderr, "[cpu.main] after first synchronize vi.clock=%lld vi.inactive=%u\n",
-        (long long)vi.clock, (unsigned)vi.inactiveCounter);
-    }
     // If PC oscillates between two values (branch + delay slot), we are in
     // an idle spin.  Only fast-forward when interrupts are globally enabled
     // and none are already pending (so we don't skip over a real event).
@@ -102,8 +82,11 @@ auto CPU::main() -> void {
   }
 #if defined(ARES_WEB)
   s_totalIters += iters;
-  fprintf(stderr, "[cpu.main] exit iters=%llu total=%llu vi.refreshed=%d\n",
-    (unsigned long long)iters, (unsigned long long)s_totalIters, (int)vi.refreshed);
+  if (shouldLog) {
+    fprintf(stderr, "[cpu.main#%u] exit iters=%llu vi.refreshed=%d\n",
+      s_frameCount, (unsigned long long)iters, (int)vi.refreshed);
+  }
+  s_frameCount++;
 #endif
 
   vi.refreshed = false;
