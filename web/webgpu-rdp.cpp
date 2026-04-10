@@ -276,7 +276,7 @@ struct WebGpuRdp::Implementation {
     u32  fbDepthAddr   = 0;   // depth buffer byte address
     u32  fbWidth       = 0;   // fb pixel width
     u32  fbHeight      = 0;   // deduced fb height (from scissor yhi)
-    u32  fbFmt         = 0;   // 0=RGBA8888, 2=RGBA5551 (FBFormat enum)
+    u32  fbFmt         = 0;   // FBFormat: 0=I4, 1=I8, 2=RGBA5551/IA16, 3=IA88, 4=RGBA8888
     u32  numPrimitives = 0;   // triangle count for this SyncFull batch
     u32  scissorYHi    = 0;   // scissor yhi (used to deduce height)
 
