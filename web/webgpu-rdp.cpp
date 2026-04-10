@@ -1121,7 +1121,21 @@ auto WebGpuRdp::render() -> bool {
     // When GPU shaders are not yet active, return false so the software RDP
     // in render.cpp can process commands and write pixels into RDRAM.
     // mapScanoutRead() will then pick up those pixels from RDRAM directly.
-    if (!I.gpuRenderingActive) return false;
+    if (!I.gpuRenderingActive) {
+        // Log every second (approx 60 frames) so the failure is visible even
+        // when the startup compile-error logs have scrolled off.
+        static u32 swFallbackCount = 0;
+        if (swFallbackCount < 5 || swFallbackCount % 60 == 0) {
+            fprintf(stderr, "[render#%u] gpuRenderingActive=false — SW fallback active "
+                "(ubershader=%p rgba5551=%p rgba8888=%p spanSetup=%p tileBin=%p)\n",
+                swFallbackCount,
+                (void*)I.pl_ubershader, (void*)I.pl_ubershader_rgba5551,
+                (void*)I.pl_ubershader_rgba8888,
+                (void*)I.pl_spanSetup, (void*)I.pl_tileBinning);
+        }
+        swFallbackCount++;
+        return false;
+    }
 
     // Identical queue-reading logic to vulkan.cpp::Vulkan::render().
     auto& command = rdp.command;
@@ -1187,14 +1201,14 @@ auto WebGpuRdp::render() -> bool {
 auto WebGpuRdp::scanoutAsync(bool /*field*/) -> bool {
     if (!implementation) return false;
     auto& I = *implementation;
-    if (I.viOrigin == 0 || I.viWidth == 0) return false;
-
     // Periodic diagnostic: log GPU/SW path every 60 frames so it appears
     // in any log window regardless of when the user captures output.
     if (I.frameCount < 4 || I.frameCount % 60 == 0) {
         fprintf(stderr, "[scanout#%u] gpuActive=%d viOrigin=0x%x viW=%u readbackReady=%d\n",
             I.frameCount, (int)I.gpuRenderingActive, I.viOrigin, I.viWidth, (int)I.readbackReady);
     }
+
+    if (I.viOrigin == 0 || I.viWidth == 0) return false;
 
     if (!I.gpuRenderingActive) {
         // Software path: RDRAM has already been written by the SW RDP.
