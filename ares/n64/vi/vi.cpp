@@ -140,12 +140,29 @@ auto VI::main() -> void {
         lineDuration = io.hsyncLeap[io.leapPattern.bit(io.leapCounter)];
       step(lineDuration);
     } else {
-      // halfLinesPerField not yet programmed: VI timing hardware is idle.
-      // Just keep time moving so other components can advance.
-      io.vcounter = 0;
+      // halfLinesPerField not yet programmed (or cleared to 0).
+      // Advance vcounter freely so the coincidence interrupt can still fire.
+      // Games that wait for VI interrupt before configuring VI fully (setting
+      // colorDepth, halfLinesPerField) depend on this to proceed past init.
+      ++io.vcounter;  // n9: wraps naturally at 512
       if(++inactiveCounter >= 200) {
         inactiveCounter = 0;
         refreshed = true;
+      }
+      // Coincidence interrupt check — mirrors the interlaced path above.
+      // halfLinesPerField=0 means bit(0)=0 so we take the interlaced branch.
+      if(io.coincidence.bit(0)) {
+        if(io.vcounter == io.coincidence >> 1)
+          mi.raise(MI::IRQ::VI);
+      }
+      if(!io.coincidence.bit(0)) {
+        int halfline = io.vcounter << 1 | io.field;
+        if(!io.field && halfline == io.coincidence)
+          mi.raise(MI::IRQ::VI);
+        if(io.field && halfline + 1 == io.coincidence)
+          mi.raise(MI::IRQ::VI);
+        if(!io.field && halfline == io.halfLinesPerField && io.coincidence == 0)
+          mi.raise(MI::IRQ::VI);
       }
       step(0x800);
     }

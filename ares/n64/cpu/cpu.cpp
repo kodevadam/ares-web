@@ -51,18 +51,22 @@ auto CPU::main() -> void {
         (unsigned)(ipu.pc & 0xffffffffu));
     }
     if(iters > MAX_ITERS) {
-      fprintf(stderr, "[cpu.main] cap hit: total=%llu vi.clock=%lld vi.inactive=%u pc=%08x\n",
+      fprintf(stderr, "[cpu.main] cap hit: total=%llu vi.clock=%lld vi.inactive=%u vi.hlpf=%u vi.coi=%u pc=%08x\n",
         (unsigned long long)(s_totalIters + iters),
         (long long)vi.clock,
         (unsigned)vi.inactiveCounter,
+        (unsigned)(u32)vi.io.halfLinesPerField,
+        (unsigned)(u32)vi.io.coincidence,
         (unsigned)(ipu.pc & 0xffffffffu));
       break;
     }
     if(iters % 100000ULL == 0) {
-      fprintf(stderr, "[cpu.main] iter %llu vi.clock=%lld vi.inactive=%u pc=%08x\n",
+      fprintf(stderr, "[cpu.main] iter %llu vi.clock=%lld vi.inactive=%u vi.hlpf=%u vi.coi=%u pc=%08x\n",
         (unsigned long long)(s_totalIters + iters),
         (long long)vi.clock,
         (unsigned)vi.inactiveCounter,
+        (unsigned)(u32)vi.io.halfLinesPerField,
+        (unsigned)(u32)vi.io.coincidence,
         (unsigned)(ipu.pc & 0xffffffffu));
     }
 #endif
